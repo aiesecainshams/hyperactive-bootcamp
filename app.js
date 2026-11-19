@@ -94,7 +94,7 @@ quantities.forEach( (qs, i) => qs.forEach( (q, j) => {
 // Paste the Apps Script Web App URL (ends in /exec). Leave '' to run local-only like before.
 const API_URL = 'https://script.google.com/macros/s/AKfycbxkJke-IToJy1M0WcXPCGISs14_3rFTcrQBjpka9d20iwDvvjEr_hGtx-dOsAifpF-e/exec';
 const POLL_MS = 20000;
-const REMOTE = !!API_URL && !/[?&]demo\b/.test(location.search);   // ?demo = local sample arena
+const REMOTE = !!API_URL;
 const CACHE_KEY = 'asfc-arena-cache-v1', QUEUE_KEY = 'asfc-arena-queue-v1', TS_KEY = 'asfc-arena-ts';
 let myFighter = '';
 try {
@@ -129,11 +129,26 @@ const format = n => n.toLocaleString('en-US', {
     maximumFractionDigits: 2
 });
 
+/* ---------- Function-restricted KPIs ----------
+   A KPI with a function (KPIs sheet, column E) can only be earned by fighters of that function.
+   Blank = open to everyone. Several functions can be separated by , ; / or | */
+const normFn = s => String(s || '').trim().toLowerCase();
+const kpiFns = k => String(k.function || '').split(/[,;/|]/).map(normFn).filter(Boolean);
+const canEarn = (f, k) => { const fns = kpiFns(k); return !fns.length || fns.includes(normFn(f.function)); };
+const kpisFor = f => state.kpis.filter(k => canEarn(f, k));
+let adminFighter = '';
+function kpiTags(f, cls = '') {   // the specific KPIs a fighter has achieved in the selected period
+    const by = new Map();
+    selectedResults().filter(r => r.fighter === f.id).forEach(r => by.set(r.kpi, (by.get(r.kpi) || 0) + r.quantity));
+    const tags = state.kpis.filter(k => by.has(k.id)).map(k => `<span class="kpi-tag">${esc(k.name)} <b>×${by.get(k.id)}</b></span>`).join('');
+    return `<div class="kpi-tags ${cls}">${tags || '<span class="kpi-none">—</span>'}</div>`;
+}
+const kpiOptions = f => (f ? kpisFor(f) : state.kpis).map(k => `<option value="${esc(k.id)}">${esc(k.name)} (${format(k.weight)})</option>`).join('') || '<option value="" disabled selected>No KPIs for this function</option>';
+
 /* ---------- Identity: fighter numbers, tiers, damage, first night, most improved ---------- */
-const fno = f => { const o = typeof f === 'string' ? state.fighters.find(x => x.id === f) : f; return String((o && o.num) || state.fighters.findIndex(x => x.id === (o && o.id)) + 1).padStart(3, '0'); };
+const fno = f => String(state.fighters.findIndex(x => x.id === (typeof f === 'string' ? f : f.id)) + 1).padStart(3, '0');   // 001, 002… in sheet order
 const TIERS = [['SPECTATOR', 0], ['RECRUIT', 1], ['BRAWLER', 100], ['VETERAN', 300], ['LEGEND', 600]];   // [name, overall points needed]
-let _tot = null, _meta = null, _wm = null, _rk = null;
-const ranked = () => _rk || (_rk = ranked0());                                  // both reset at the top of render()
+let _tot = null, _meta = null;                                  // both reset at the top of render()
 const totals = () => _tot || (_tot = state.results.reduce((m, r) => m.set(r.fighter, (m.get(r.fighter) || 0) + points(r)), new Map()));
 const tierIdx = p => TIERS.reduce((a, t, i) => p >= t[1] ? i : a, 0);
 const tierOf = id => tierIdx(totals().get(id) || 0);
@@ -169,7 +184,7 @@ function renderRules() {   // Fight Club numbering: 01 show up · 02 no spectato
     const nav = $('#nav-rules'); if (nav) nav.textContent = `Rules 01—${pad(last)}`;
     $('#rule-cards').innerHTML = `<article class="rule-card"><p class="eyebrow">RULE 01</p><h3>SHOW UP. DO THE WORK.</h3><p class="rule-text">Recognition is earned here.</p></article>`
         + `<article class="rule-card rule-quiet"><p class="eyebrow">RULE 02</p><h3>YOU DO NOT TALK ABOUT THE ARENA.</h3><p class="rule-text">Everyone here is on the board. Nobody watches from the side.</p><span class="ribbon">NO SPECTATORS</span></article>`
-        + (state.kpis.map((k, i) => `<article class="rule-card"><p class="eyebrow">RULE ${pad(i + 3)}</p><h3>${esc(k.name)}</h3><strong>${format(k.weight)}</strong> <small>PTS / RESULT</small></article>`).join('') || '<p class="empty">Add your first KPI in the control room.</p>')
+        + (state.kpis.map((k, i) => `<article class="rule-card"><p class="eyebrow">RULE ${pad(i + 3)}</p><h3>${esc(k.name)}</h3><small class="rule-fn">${k.function ? esc(k.function) : 'ALL FUNCTIONS'}</small><strong>${format(k.weight)}</strong> <small>PTS / RESULT</small></article>`).join('') || '<p class="empty">Add your first KPI in the control room.</p>')
         + `<article class="rule-card rule-first"><p class="eyebrow">RULE ${pad(last)}</p><h3>IF THIS IS YOUR FIRST NIGHT, YOU HAVE TO FIGHT.</h3><p class="rule-text">${names.length ? `New on the board tonight: ${esc(names.join(', '))}.` : 'Land your first verified result and the badge is yours.'}</p><span class="fn-seal"><b>FIRST</b><b>NIGHT</b></span></article>`;
 }
 
@@ -207,6 +222,55 @@ function photoTag(f) {
 }
 const portrait = (f, extra = '') => `<span class="portrait ${extra}"><span class="p-frame"><b class="p-init">${esc(initials(f.name))}</b>${imgTag(f, 'fighter-photo', 120)}${scuffs(f.id)}</span>${extra ? '<i class="clip"></i>' : ''}</span>`;
 
+/* ---------- Function boards (leaderboard per function) ---------- */
+let fnSel = '';
+const fnKey = f => (f.function || '').trim().toUpperCase() || 'OTHER';
+function ensureFnBoard() {
+    let sec = $('#fn-board');
+    if (sec) return sec;
+    const table = $('#rankings') && $('#rankings').closest('table');
+    if (!table) return null;
+    const anchor = table.closest('section') || table.parentElement;
+    const wrapClass = table.parentElement !== anchor ? table.parentElement.className : '';
+    const periodBtn = $('#periods button');
+    sec = document.createElement('section');
+    sec.id = 'fn-board';
+    sec.className = anchor.tagName === 'SECTION' ? anchor.className : '';
+    sec.dataset.tabClass = periodBtn ? periodBtn.className.replace(/\bselected\b/g, '').trim() : '';
+    sec.dataset.tabsWrap = $('#periods') ? $('#periods').className : 'tabs';
+    sec.innerHTML = '<div class="board-heading"><div><p class="eyebrow" id="fn-period"></p><h2>FUNCTION BOARDS.</h2></div></div><div id="fn-tabs" role="tablist"></div>'
+        + `<div class="${esc(wrapClass)}"><table class="${esc(table.className)}">${table.querySelector('thead') ? table.querySelector('thead').outerHTML : ''}<tbody id="fn-rankings"></tbody></table></div>`;
+    anchor.insertAdjacentElement('afterend', sec);
+    $('#fn-tabs').className = sec.dataset.tabsWrap;
+    $('#fn-tabs').addEventListener('click', e => {
+        const b = e.target.closest('[data-fn]');
+        if (!b) return;
+        fnSel = b.dataset.fn;
+        renderFunctionBoard();
+    });
+    return sec;
+}
+function renderFunctionBoard(rows = ranked()) {
+    const sec = ensureFnBoard();
+    if (!sec) return;
+    const keys = [...new Set(rows.map(fnKey))].sort();
+    sec.hidden = !keys.length;
+    if (!keys.length) return;
+    if (!keys.includes(fnSel)) fnSel = keys[0];
+    const cls = sec.dataset.tabClass;
+    $('#fn-period').textContent = day === 'all' ? 'ALL FOUR DAYS' : `DAY ${Number(day) - 18}`;
+    $('#fn-tabs').innerHTML = keys.map(k => {
+        const total = rows.filter(f => fnKey(f) === k).reduce((n, f) => n + f.points, 0);
+        return `<button type="button" class="${cls}${k === fnSel ? ' selected' : ''}" role="tab" aria-selected="${k === fnSel}" data-fn="${esc(k)}">${esc(k)}<span class="fn-total">${format(total)}</span></button>`;
+    }).join('');
+    let rank = 0;
+    const list = rows.filter(f => fnKey(f) === fnSel).map((f, i, a) => {
+        if (i === 0 || f.points !== a[i - 1].points) rank = i + 1;
+        return { ...f, frank: rank, gap: i ? a[i - 1].points - f.points : 0, first: i === 0 };
+    });
+    $('#fn-rankings').innerHTML = list.map(f => `<tr class="${f.frank === 1 ? 'first-row' : ''}" tabindex="0" role="button" aria-label="View ${esc(f.name)} scorecard" data-fighter="${esc(f.id)}"><td>${String(f.frank).padStart(2, '0')}</td><td><div class="fighter-cell">${avatar(f)}<div><b>${esc(f.name)}</b><small>OVERALL #${String(f.rank).padStart(2, '0')} · FIGHTER ${fno(f)}</small>${kpiTags(f, 'in-fighter')}</div></div></td><td><span class="func-tag">${esc(f.function)}</span></td><td><b>${format(f.quantity)}</b>${kpiTags(f)}</td><td><data class="cnt" value="${f.points}" data-key="fn:${esc(f.id)}">${format(f.points)}</data></td><td>${f.frank === 1 ? 'THE LEAD' : f.gap === 0 ? 'TIED' : `${format(f.gap)} PTS`}</td><td>↗</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No fighters in this function.</td></tr>';
+    runCounts($('#fn-rankings'));
+}
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
 function toast(message) {
     $('#toast').textContent = message;
@@ -228,25 +292,24 @@ function save(message) {
     render();
 }
 function points(r) {
-    return r.quantity * ((_wm || (_wm = new Map(state.kpis.map(k => [k.id, k.weight])))).get(r.kpi) || 0);
+    return r.quantity * (state.kpis.find(k => k.id === r.kpi)?.weight || 0);
 }
 function selectedResults() {
     return state.results.filter(r => day === 'all' || r.day === day);
 }
-function ranked0() {
+function ranked() {
     const rows = state.fighters.map(f => {
         let results = selectedResults().filter(r => r.fighter === f.id);
         return {
             ...f,
             points: results.reduce( (a, r) => a + points(r), 0),
-            quantity: results.reduce( (a, r) => a + r.quantity, 0),
-            last: results.reduce( (m, r) => Math.max(m, r.ts || 0), 0)
+            quantity: results.reduce( (a, r) => a + r.quantity, 0)
         };
     }
-    ).sort( (a, b) => b.points - a.points || a.last - b.last || a.name.localeCompare(b.name));
+    ).sort( (a, b) => b.points - a.points || a.name.localeCompare(b.name));
     let rank = 0;
     return rows.map( (f, i) => {
-        if (i === 0 || f.points !== rows[i - 1].points || f.points > 0)
+        if (i === 0 || f.points !== rows[i - 1].points)
             rank = i + 1;
         return {
             ...f,
@@ -256,7 +319,7 @@ function ranked0() {
     );
 }
 function render() {
-    _tot = _meta = _wm = _rk = null;
+    _tot = _meta = null;
     const rows = ranked()
       , lead = rows[0];
     $('.demo').innerHTML = `<i></i> ${state.demo ? 'DEMO ARENA' : REMOTE ? 'LIVE ARENA' : 'LOCAL ARENA'}`;
@@ -282,7 +345,7 @@ function render() {
     renderIdentity();
     trackRanks(rows);
     renderRows(rows, true);
-    
+    renderFunctionBoard(rows);
     $('#activity').innerHTML = selectedResults().slice(-5).reverse().map(r => {
         let f = state.fighters.find(f => f.id === r.fighter)
           , k = state.kpis.find(k => k.id === r.kpi);
@@ -294,6 +357,7 @@ function render() {
     renderRules();
     renderTicker();
     checkChampion();
+    renderTV();
 }
 function renderRows(rows=ranked(), flip=false) {
     let query = $('#search').value.trim().toLowerCase()
@@ -305,7 +369,7 @@ function renderRows(rows=ranked(), flip=false) {
         let index = rows.findIndex(r => r.id === f.id)
           , gap = index ? rows[index - 1].points - f.points : 0
           , di = deltaInfo(f.id);
-        return `<tr class="${f.rank === 1 ? 'first-row' : ''}${meta().improved === f.id ? ' improved' : ''}${f.id === myFighter ? ' me' : ''}${di ? (di.d > 0 ? ' moved-up' : ' moved-down') : ''}"${di ? ` style="--age:${di.age}ms"` : ''} tabindex="0" role="button" aria-label="View ${esc(f.name)} scorecard" data-fighter="${esc(f.id)}"><td>${String(f.rank).padStart(2, '0')}${deltaBadge(di)}</td><td><div class="fighter-cell">${avatar(f)}<div><b>${esc(f.name)}</b><small>FIGHTER ${fno(f)} · ${TIERS[tierOf(f.id)][0]}</small>${chips(f.id)}</div></div></td><td><span class="func-tag">${esc(f.function)}</span></td><td>${format(f.quantity)}</td><td><data class="cnt" value="${f.points}" data-key="t:${esc(f.id)}">${format(f.points)}</data></td><td>${f.rank === 1 ? 'THE LEAD' : gap === 0 ? 'TIED' : `${format(gap)} PTS`}</td><td>↗</td></tr>`;
+        return `<tr class="${f.rank === 1 ? 'first-row' : ''}${meta().improved === f.id ? ' improved' : ''}${di ? (di.d > 0 ? ' moved-up' : ' moved-down') : ''}"${di ? ` style="--age:${di.age}ms"` : ''} tabindex="0" role="button" aria-label="View ${esc(f.name)} scorecard" data-fighter="${esc(f.id)}"><td>${String(f.rank).padStart(2, '0')}${deltaBadge(di)}</td><td><div class="fighter-cell">${avatar(f)}<div><b>${esc(f.name)}</b><small>FIGHTER ${fno(f)} · ${TIERS[tierOf(f.id)][0]}</small>${chips(f.id)}${kpiTags(f, 'in-fighter')}</div></div></td><td><span class="func-tag">${esc(f.function)}</span></td><td><b>${format(f.quantity)}</b>${kpiTags(f)}</td><td><data class="cnt" value="${f.points}" data-key="t:${esc(f.id)}">${format(f.points)}</data></td><td>${f.rank === 1 ? 'THE LEAD' : gap === 0 ? 'TIED' : `${format(gap)} PTS`}</td><td>↗</td></tr>`;
     }
     ).join('') || '<tr><td colspan="7" class="empty">No fighters found.</td></tr>';
     runCounts(tb);
@@ -317,7 +381,7 @@ function showScore(id) {
         return;
     let rs = selectedResults().filter(r => r.fighter === id);
     const t = tierOf(id), period = day === 'all' ? 'OVERALL' : `DAY ${Number(day) - 18}`;
-    const lines = state.kpis.map(k => {
+    const lines = kpisFor(f).map(k => {
         let q = rs.filter(r => r.kpi === k.id).reduce( (a, r) => a + r.quantity, 0);
         return `<div class="score-line"><span>${esc(k.name)}<br><small>${q} results × ${format(k.weight)} points</small></span><b>${format(q * k.weight)} PTS</b></div>`;
     }).join('');
@@ -365,8 +429,8 @@ document.addEventListener('keydown', e => {
         e.preventDefault();
         showScore(e.target.dataset.fighter);
     }
-    if (e.key === 'Escape')
-        document.body.classList.remove('projector');
+    if (e.key === 'Escape' && TV.on)
+        setTV(false);
 }
 );
 $$('.close').forEach(b => b.onclick = () => b.closest('dialog').close());
@@ -378,11 +442,7 @@ $$('dialog').forEach(d => d.addEventListener('click', e => {
     }
 }
 ));
-$('#projector').onclick = () => {
-    let active = document.body.classList.toggle('projector');
-    $('#projector').textContent = active ? '↙ Exit projector mode' : '⛶ Projector mode';
-}
-;
+$('#projector').onclick = () => setTV(!TV.on);
 function renderIdentity() {
     const select = $('#identity-select');
     select.innerHTML = '<option value="">Choose your fighter</option>' + state.fighters.map(f => `<option value="${esc(f.id)}">${fno(f)} · ${esc(f.name)}</option>`).join('');
@@ -417,7 +477,7 @@ function renderCorner() {
       , level = tier(totals().get(f.id) || 0)
       , rs = selectedResults().filter(r => r.fighter === f.id)
       , gap = rival ? rival.points - f.points + 1 : 0;
-    box.innerHTML = `<div class="corner-top"><div class="corner-id">${portrait(f)}<span class="eyebrow">${esc(f.function)} / FIGHTER ${fno(f)}</span><h2>${esc(f.name.toUpperCase())}</h2><span class="belt">${level[0]}</span>${chips(f.id)}<p>${level[1] != null ? `Next tier: ${TIERS[level[2] + 1][0]} at ${level[1]} points` : 'Top tier. Nobody climbs higher.'}</p></div><div class="corner-number"><span>RANK</span><b>${String(f.rank).padStart(2, '0')}</b></div><div class="corner-number"><span>POINTS</span><b>${format(f.points)}</b></div></div><div class="corner-grid"><article class="rival-card"><p class="eyebrow">${rival ? 'YOUR NEXT TARGET' : 'DEFEND THE TOP SPOT'}</p><h3>${rival ? esc(rival.name.toUpperCase()) : 'THEY ARE<br>COMING FOR YOU.'}</h3><p>${rival ? `Earn <b>${format(gap)} more points</b> to take the next position.` : 'You hold the lead. Keep adding verified results to extend it.'}</p><div class="progress-track"><i style="width:${rival ? Math.min(100, 100 * f.points / (rival.points + 1)) : 100}%"></i></div><small>${format(f.points)} / ${rival ? format(rival.points + 1) : 'THE LEAD'}</small></article><article class="mission-card"><p class="eyebrow">MAKE YOUR NEXT MOVE</p><h3>${rival ? 'CLOSE THE GAP.' : 'RAISE THE BAR.'}</h3><p>Possible next moves using current KPI weights.</p>${state.kpis.filter(k => k.weight > 0).slice().sort( (a, b) => b.weight - a.weight).slice(0, 3).map(k => `<div class="mission-line"><b>${Math.ceil((gap || 50) / k.weight)}×</b><span>${esc(k.name)}<small>${format(k.weight)} points each</small></span><span>↗</span></div>`).join('') || '<p>Add positive KPI weights to see suggested moves.</p>'}<small class="mission-note">Suggestions only. Results must be verified.</small></article></div><section class="personal-history"><div class="panel-heading"><h3>YOUR FOUR ROUNDS.</h3><span class="eyebrow">POINTS BY DAY / ALL DAYS</span></div><div class="round-bars">${['19', '20', '21', '22'].map( (d, i) => {
+    box.innerHTML = `<div class="corner-top"><div class="corner-id">${portrait(f)}<span class="eyebrow">${esc(f.function)} / FIGHTER ${fno(f)}</span><h2>${esc(f.name.toUpperCase())}</h2><span class="belt">${level[0]}</span>${chips(f.id)}<p>${level[1] != null ? `Next tier: ${TIERS[level[2] + 1][0]} at ${level[1]} points` : 'Top tier. Nobody climbs higher.'}</p></div><div class="corner-number"><span>RANK</span><b>${String(f.rank).padStart(2, '0')}</b></div><div class="corner-number"><span>POINTS</span><b>${format(f.points)}</b></div></div><div class="corner-grid"><article class="rival-card"><p class="eyebrow">${rival ? 'YOUR NEXT TARGET' : 'DEFEND THE TOP SPOT'}</p><h3>${rival ? esc(rival.name.toUpperCase()) : 'THEY ARE<br>COMING FOR YOU.'}</h3><p>${rival ? `Earn <b>${format(gap)} more points</b> to take the next position.` : 'You hold the lead. Keep adding verified results to extend it.'}</p><div class="progress-track"><i style="width:${rival ? Math.min(100, 100 * f.points / (rival.points + 1)) : 100}%"></i></div><small>${format(f.points)} / ${rival ? format(rival.points + 1) : 'THE LEAD'}</small></article><article class="mission-card"><p class="eyebrow">MAKE YOUR NEXT MOVE</p><h3>${rival ? 'CLOSE THE GAP.' : 'RAISE THE BAR.'}</h3><p>Possible next moves using current KPI weights.</p>${kpisFor(f).filter(k => k.weight > 0).slice().sort( (a, b) => b.weight - a.weight).slice(0, 3).map(k => `<div class="mission-line"><b>${Math.ceil((gap || 50) / k.weight)}×</b><span>${esc(k.name)}<small>${format(k.weight)} points each</small></span><span>↗</span></div>`).join('') || '<p>No scoring KPIs are set up for your function yet.</p>'}<small class="mission-note">Suggestions only. Results must be verified.</small></article></div><section class="personal-history"><div class="panel-heading"><h3>YOUR FOUR ROUNDS.</h3><span class="eyebrow">POINTS BY DAY / ALL DAYS</span></div><div class="round-bars">${['19', '20', '21', '22'].map( (d, i) => {
         let n = state.results.filter(r => r.fighter === f.id && r.day === d).reduce( (a, r) => a + points(r), 0)
           , max = Math.max(1, ...['19', '20', '21', '22'].map(x => state.results.filter(r => r.fighter === f.id && r.day === x).reduce( (a, r) => a + points(r), 0)));
         return `<div><span>DAY 0${i + 1}</span><div class="round-bar"><i style="height:${Math.max(2, n / max * 100)}%"></i></div><b>${format(n)}</b></div>`;
@@ -431,11 +491,11 @@ function compareRender() {
         $('#comparison').innerHTML = '<p class="helper">Add at least two fighters to compare them.</p>';
         return;
     }
-    $('#comparison').innerHTML = `<div class="compare-scores"><div><b>${format(a.points)}</b><span>RANK ${a.rank} · №${fno(a)}</span></div><span>VS</span><div><b>${format(b.points)}</b><span>RANK ${b.rank} · №${fno(b)}</span></div></div><p class="compare-verdict">${a.points === b.points ? 'DEAD EVEN. NEXT RESULT DECIDES.' : `${esc((a.points > b.points ? a : b).name.toUpperCase())} LEADS BY ${format(Math.abs(a.points - b.points))}.`}</p><p class="eyebrow">${day === 'all' ? 'OVERALL' : `DAY ${Number(day) - 18}`} / POINTS BY KPI</p>${state.kpis.map(k => {
+    $('#comparison').innerHTML = `<div class="compare-scores"><div><b>${format(a.points)}</b><span>RANK ${a.rank} · №${fno(a)}</span></div><span>VS</span><div><b>${format(b.points)}</b><span>RANK ${b.rank} · №${fno(b)}</span></div></div><p class="compare-verdict">${a.points === b.points ? 'DEAD EVEN. NEXT RESULT DECIDES.' : `${esc((a.points > b.points ? a : b).name.toUpperCase())} LEADS BY ${format(Math.abs(a.points - b.points))}.`}</p><p class="eyebrow">${day === 'all' ? 'OVERALL' : `DAY ${Number(day) - 18}`} / POINTS BY KPI</p>${state.kpis.filter(k => canEarn(a, k) || canEarn(b, k)).map(k => {
         let score = f => selectedResults().filter(r => r.fighter === f.id && r.kpi === k.id).reduce( (n, r) => n + points(r), 0)
           , x = score(a)
           , y = score(b);
-        return `<div class="comparison-row"><b class="${x > y ? 'winning' : ''}">${format(x)}</b><span>${esc(k.name)}</span><b class="${y > x ? 'winning' : ''}">${format(y)}</b></div>`;
+        return `<div class="comparison-row"><b class="${x > y ? 'winning' : ''}">${canEarn(a, k) ? format(x) : '—'}</b><span>${esc(k.name)}</span><b class="${y > x ? 'winning' : ''}">${canEarn(b, k) ? format(y) : '—'}</b></div>`;
     }
     ).join('')}`;
 }
@@ -462,7 +522,7 @@ $('#identity-select').onchange = e => {
     try {
         localStorage.setItem('asfc-my-fighter', myFighter);
     } catch {}
-    ;toast(myFighter ? 'Your corner is ready.' : 'Fighter selection cleared.'); if (myFighter) setView('corner');
+    ;toast(myFighter ? 'Your corner is ready.' : 'Fighter selection cleared.');
 }
 ;
 $('#open-corner').onclick = () => {
@@ -485,7 +545,7 @@ function countdown() {
         $('#countdown-value').textContent = `${days}D : ${String(hours).padStart(2, '0')}H`;
         $('#countdown-note').textContent = 'Until 19 Nov · Cairo time';
     } else if (now < end) {
-        document.body.classList.add('live'); $('#countdown-label').textContent = 'THE BOOTCAMP IS ON';
+        $('#countdown-label').textContent = 'THE BOOTCAMP IS ON';
         $('#countdown-value').textContent = `DAY 0${Math.min(4, Math.floor((now - Date.parse('2026-11-19T00:00:00+02:00')) / 86400000) + 1)}`;
         $('#countdown-note').textContent = '19—22 November · Earn your place';
     } else {
@@ -567,18 +627,17 @@ async function flush() {
 async function pull() {
     if (!REMOTE) return;
     try {
-        const res = await fetch(API_URL + '?rev=' + (sync.rev || '') + '&t=' + Date.now(), { cache: 'no-store' });
+        const res = await fetch(API_URL + '?t=' + Date.now(), { cache: 'no-store' });
         const data = await res.json();
-        if (data && data.ok && data.same) { sync.lastOk = Date.now(); setSync('ok'); liveReady = true; return; }
         if (!data || !data.ok || !valid(data.state)) throw Error('bad payload');
         sync.lastOk = Date.now();
         try { localStorage.setItem(TS_KEY, String(sync.lastOk)); } catch {}
         setSync('ok');
-        if (sync.queue.length && getToken()) return;                            // never overwrite changes still waiting to sync
+        if (sync.queue.length) return;                            // never overwrite changes still waiting to sync
         const j = JSON.stringify(data.state);
         if (j !== sync.lastJson) {
             sync.lastJson = j;
-            state = data.state; sync.rev = data.rev || '';
+            state = data.state;
             try { persistLocal(); } catch {}
             render();
         }
@@ -595,7 +654,7 @@ if (REMOTE) {
     ensureSyncBar();
     setSync('offline');
     document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
-    setInterval(tick, POLL_MS + Math.floor(Math.random() * 4000));
+    setInterval(tick, POLL_MS);
     tick();
 }
 
@@ -614,7 +673,7 @@ function unlocked() {
     try { return !!sessionStorage.getItem(SESSION_KEY); } catch { return false; }
 }
 function cairoDay() {
-    const d = +new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Cairo', day: 'numeric' }).format(new Date());
+    const d = new Date(Date.now() + 2 * 3600000).getUTCDate();
     return ['19', '20', '21', '22'].includes(String(d)) ? String(d) : '19';
 }
 function ensureAdminDialog() {
@@ -631,17 +690,24 @@ function renderAdmin() {
     const box = $('#admin-body');
     if (!box) return;
     const tabs = [['results', 'Results'], ['fighters', 'Fighters'], ['kpis', 'KPIs'], ['data', 'Data']];
-    const fOpts = state.fighters.map(f => `<option value="${esc(f.id)}">${fno(f)} · ${esc(f.name)}</option>`).join('');
-    const kOpts = state.kpis.map(k => `<option value="${esc(k.id)}">${esc(k.name)} (${format(k.weight)})</option>`).join('');
+    const selF = state.fighters.find(f => f.id === adminFighter) || state.fighters[0];
+    const fOpts = state.fighters.map(f => `<option value="${esc(f.id)}"${selF && f.id === selF.id ? ' selected' : ''}>${fno(f)} · ${esc(f.name)} (${esc(f.function)})</option>`).join('');
+    const kOpts = kpiOptions(selF);
     const dayOpts = ['19', '20', '21', '22'].map((d, i) => `<option value="${d}" ${d === cairoDay() ? 'selected' : ''}>Day 0${i + 1}</option>`).join('');
     let body = '';
     if (adminTab === 'results') {
-        body = entryPane();
+        const list = state.results.slice().reverse().slice(0, 40).map(r => {
+            const f = state.fighters.find(x => x.id === r.fighter), k = state.kpis.find(x => x.id === r.kpi);
+            return `<div class="adm-row"><span><b>${esc(f.name)}</b><small>${r.quantity} × ${esc(k.name)} · Day ${Number(r.day) - 18}</small></span><b>+${format(points(r))}</b><button type="button" class="adm-x" data-act="del-result" data-id="${esc(r.id)}" aria-label="Delete result">×</button></div>`;
+        }).join('') || '<p class="helper">No results yet.</p>';
+        body = state.fighters.length && state.kpis.length
+            ? `<form class="adm-form" data-form="result"><label>Fighter<select name="fighter" data-edit="result-fighter">${fOpts}</select></label><label>KPI<select name="kpi">${kOpts}</select></label><label>Qty<input name="quantity" type="number" min="1" step="1" value="1" required></label><label>Day<select name="day">${dayOpts}</select></label><button class="primary">Add result</button></form><h4>Latest 40 results</h4><div class="adm-list">${list}</div>`
+            : '<p class="helper">Add at least one fighter and one KPI first.</p>';
     } else if (adminTab === 'fighters') {
         const fns = [...new Set(state.fighters.map(f => f.function))].map(x => `<option value="${esc(x)}">`).join('');
         body = `<form class="adm-form" data-form="fighter"><label>Name<input name="name" required maxlength="60"></label><label>Function<input name="function" list="fn-list" required maxlength="20"></label><label>Photo link<input name="photo_url" maxlength="500" placeholder="https://… (optional, Drive share link ok)"></label><datalist id="fn-list">${fns}</datalist><button class="primary">Add fighter</button></form><div class="adm-list">${state.fighters.map(f => `<div class="adm-row edit"><input data-edit="fighter-name" data-id="${esc(f.id)}" value="${esc(f.name)}" aria-label="Name"><input data-edit="fighter-fn" data-id="${esc(f.id)}" value="${esc(f.function)}" aria-label="Function" list="fn-list"><input data-edit="fighter-photo" data-id="${esc(f.id)}" value="${esc(f.photo_url || '')}" placeholder="Photo link (https://…)" aria-label="Photo link" maxlength="500"><button type="button" class="adm-x" data-act="del-fighter" data-id="${esc(f.id)}" aria-label="Remove fighter">×</button></div>`).join('') || '<p class="helper">No fighters yet.</p>'}</div>`;
     } else if (adminTab === 'kpis') {
-        body = `<p class="helper">Changing a weight recalculates every score in the arena.</p><form class="adm-form" data-form="kpi"><label>KPI name<input name="name" required maxlength="60"></label><label>Points each<input name="weight" type="number" min="0" step="1" required></label><button class="primary">Add KPI</button></form><div class="adm-list">${state.kpis.map(k => `<div class="adm-row edit"><input data-edit="kpi-name" data-id="${esc(k.id)}" value="${esc(k.name)}" aria-label="KPI name"><input data-edit="kpi-weight" data-id="${esc(k.id)}" type="number" min="0" step="1" value="${k.weight}" aria-label="Weight"><button type="button" class="adm-x" data-act="del-kpi" data-id="${esc(k.id)}" aria-label="Remove KPI">×</button></div>`).join('') || '<p class="helper">No KPIs yet.</p>'}</div>`;
+        body = `<p class="helper">Changing a weight recalculates every score in the arena.</p><form class="adm-form" data-form="kpi"><label>KPI name<input name="name" required maxlength="60"></label><label>Points each<input name="weight" type="number" min="0" step="any" required></label><label>Function<input name="function" list="kfn-list" maxlength="40" placeholder="All functions"></label><datalist id="kfn-list">${[...new Set(state.fighters.map(f => f.function))].map(x => `<option value="${esc(x)}">`).join('')}</datalist><button class="primary">Add KPI</button></form><div class="adm-list">${state.kpis.map(k => `<div class="adm-row edit"><input data-edit="kpi-name" data-id="${esc(k.id)}" value="${esc(k.name)}" aria-label="KPI name"><input data-edit="kpi-weight" data-id="${esc(k.id)}" type="number" min="0" step="any" value="${k.weight}" aria-label="Weight"><input data-edit="kpi-fn" data-id="${esc(k.id)}" value="${esc(k.function || '')}" placeholder="All functions" aria-label="Function" list="kfn-list" maxlength="40"><button type="button" class="adm-x" data-act="del-kpi" data-id="${esc(k.id)}" aria-label="Remove KPI">×</button></div>`).join('') || '<p class="helper">No KPIs yet.</p>'}</div>`;
     } else {
         body = `<p class="helper">${REMOTE ? 'Scores live in the shared Google Sheet and sync to every device. Export a backup before big changes.' : 'Everything is stored in this browser only. Export a backup before closing or switching devices.'}</p><div class="adm-actions"><button type="button" class="outline" data-act="export">Export backup ↗</button><label class="outline adm-file">Import backup<input type="file" accept="application/json" hidden data-edit="import"></label><button type="button" class="outline" data-act="fresh">Clear sample data &amp; start fresh</button>${REMOTE ? '' : '<button type="button" class="outline" data-act="demo">Restore sample data</button>'}<button type="button" class="outline" data-act="preview-takeover">Preview champion takeover</button><button type="button" class="outline" data-act="password">Change password</button><button type="button" class="outline" data-act="lock">Lock control room</button></div>`;
     }
@@ -721,6 +787,12 @@ function adminChange(e) {
         }).catch(() => adminSay('Invalid backup file. Nothing changed.'));
         return;
     }
+    if (kind === 'result-fighter') {   // only offer the KPIs this fighter's function can earn
+        adminFighter = t.value;
+        const sel = t.form && t.form.querySelector('select[name=kpi]');
+        if (sel) sel.innerHTML = kpiOptions(state.fighters.find(x => x.id === t.value));
+        return;
+    }
     const id = t.dataset.id;
     if (kind === 'fighter-photo') {
         const f = state.fighters.find(x => x.id === id), v = t.value.trim();
@@ -737,10 +809,11 @@ function adminChange(e) {
         if (kind === 'fighter-name') f.name = v; else f.function = v;
         enqueue('upsertFighter', { fighter: { ...f } });
         adminSave('Fighter updated.');
-    } else if (kind === 'kpi-name' || kind === 'kpi-weight') {
+    } else if (kind === 'kpi-name' || kind === 'kpi-weight' || kind === 'kpi-fn') {
         const k = state.kpis.find(x => x.id === id);
         if (!k) return;
         if (kind === 'kpi-name') { if (!t.value.trim()) { renderAdmin(); return; } k.name = t.value.trim(); }
+        else if (kind === 'kpi-fn') k.function = t.value.trim();
         else { const w = parseFloat(t.value); if (!Number.isFinite(w) || w < 0) { renderAdmin(); return; } k.weight = w; }
         enqueue('upsertKpi', { kpi: { ...k } });
         adminSave('KPI updated. All scores recalculated.');
@@ -754,6 +827,9 @@ function adminSubmit(e) {
     if (kind === 'result') {
         const q = Number(v.quantity);
         if (!Number.isInteger(q) || q < 1) return adminSay('Quantity must be a whole number, 1 or more.');
+        const rf = state.fighters.find(x => x.id === v.fighter), rk = state.kpis.find(x => x.id === v.kpi);
+        if (!rf || !rk) return adminSay('Pick a fighter and a KPI.');
+        if (!canEarn(rf, rk)) return adminSay(`"${rk.name}" is a ${rk.function} KPI. ${rf.name} is ${rf.function}.`);
         const res = { id: uid(), fighter: v.fighter, kpi: v.kpi, quantity: q, day: v.day };
         state.results.push(res);
         enqueue('addResult', { result: res });
@@ -769,7 +845,7 @@ function adminSubmit(e) {
     } else if (kind === 'kpi') {
         const w = parseFloat(v.weight);
         if (!Number.isFinite(w) || w < 0) return adminSay('Weight must be 0 or more.');
-        const kpi = { id: newId('k', state.kpis), name: v.name.trim(), weight: w };
+        const kpi = { id: newId('k', state.kpis), name: v.name.trim(), weight: w, function: (v.function || '').trim() };
         state.kpis.push(kpi);
         enqueue('upsertKpi', { kpi: { ...kpi } });
         adminSave('KPI added.');
@@ -909,6 +985,137 @@ function playFlip(tb, before) {
         tr.animate([{ transform: `translateY(${dy}px)` }, { transform: 'translateY(0)' }], { duration: 750, easing: 'cubic-bezier(.2,.9,.25,1)' });
     });
 }
+
+/* ---------- Projector mode: a live TV board you can leave on all day ----------
+   Overall ranking (ignores the Day tab) + today's points · bumps and rank moves as results land ·
+   function leaders · latest hits · auto-pages if there are more than 10 fighters ·
+   fullscreen + screen wake lock · LIVE / OFFLINE indicator · Esc exits */
+const TV = { on: false, ready: false, page: 0, fs: false, ranks: new Map(), pts: new Map(), moves: new Map(), bumps: new Map(), newAt: new Map(), seen: null, timers: [], wake: null, idle: 0 };
+const TV_PAGE = 10, TV_FLASH = 9000, TV_MOVE = 14000, TV_ROTATE = 12000;
+const tvPad = n => String(n).padStart(2, '0');
+const tvAge = (map, id, ms = TV_FLASH) => { const x = map.get(id); if (!x) return null; const age = Date.now() - x.t; if (age > ms) { map.delete(id); return null; } return { ...x, age }; };
+const tvToday = () => { const d = new Date(Date.now() + 2 * 3600000).getUTCDate(); return d > 22 ? '22' : d < 19 ? '19' : String(d); };
+const cairoTime = t => new Date(t).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Cairo' });
+function tvStatus() {
+    if (!REMOTE) return { ok: true, t: 'LOCAL' };
+    const stale = sync.mode !== 'ok' || Date.now() - sync.lastOk > 75000;
+    return stale ? { ok: false, t: `OFFLINE · LAST UPDATE ${sync.lastOk ? cairoTime(sync.lastOk) : '—'}` } : { ok: true, t: 'LIVE' };
+}
+function ensureTV() {
+    let el = $('#tv');
+    if (el) return el;
+    document.body.insertAdjacentHTML('beforeend', `<div id="tv" hidden aria-live="off"><div class="tv-top"><div class="tv-brand"><img src="seal-256.png" alt=""><span>AIN SHAMS<br><b>FIGHT CLUB</b></span></div><div class="tv-mid"><b id="tv-day"></b><span>19—22 NOVEMBER · THE ARENA</span></div><div class="tv-clock"><b id="tv-time"></b><span id="tv-status" class="tv-status"><i></i><em></em></span></div></div><div class="tv-grid"><section class="tv-board"><div class="tv-head"><span>RANK</span><span>FIGHTER</span><span>TODAY</span><span>TOTAL</span></div><div id="tv-rows"></div><div id="tv-pager" class="tv-pager"></div></section><aside class="tv-side"><section class="tv-panel"><h3>FUNCTION LEADERS</h3><div id="tv-fns" class="tv-fns"></div></section><section class="tv-panel tv-feedpanel"><h3>LATEST HITS</h3><div id="tv-feed"></div></section></aside></div><div class="tv-foot"><span id="tv-stats"></span><span>EARN YOUR PLACE.</span><span class="tv-hint">ESC TO EXIT</span></div><button type="button" class="tv-exit" id="tv-exit">✕ Exit</button></div>`);
+    $('#tv-exit').onclick = () => setTV(false);
+    ['mousemove', 'mousedown', 'touchstart'].forEach(ev => document.addEventListener(ev, () => {
+        if (!TV.on) return;
+        document.body.classList.remove('tv-idle');
+        clearTimeout(TV.idle);
+        TV.idle = setTimeout(() => document.body.classList.add('tv-idle'), 3000);
+    }, { passive: true }));
+    return $('#tv');
+}
+function tvTick() {
+    if (!TV.on) return;
+    $('#tv-time').textContent = cairoTime(Date.now());
+    const s = tvStatus(), el = $('#tv-status');
+    el.className = 'tv-status ' + (s.ok ? 'ok' : 'bad');
+    el.querySelector('em').textContent = s.t;
+}
+function renderTV() {
+    if (!TV.on) return;
+    const el = ensureTV(), today = tvToday(), now = Date.now();
+    const tot = new Map(), tod = new Map();
+    state.fighters.forEach(f => { tot.set(f.id, 0); tod.set(f.id, 0); });
+    state.results.forEach(r => {
+        if (!tot.has(r.fighter)) return;
+        const p = points(r);
+        tot.set(r.fighter, tot.get(r.fighter) + p);
+        if (r.day === today) tod.set(r.fighter, tod.get(r.fighter) + p);
+    });
+    const rows = state.fighters.map(f => ({ f, p: tot.get(f.id), t: tod.get(f.id) })).sort((a, b) => b.p - a.p || a.f.name.localeCompare(b.f.name));
+    let rk = 0;
+    rows.forEach((r, i) => { if (i === 0 || r.p !== rows[i - 1].p) rk = i + 1; r.rank = rk; });
+    if (TV.ready) rows.forEach(r => {                       // what changed since the last data update
+        const old = TV.ranks.get(r.f.id), op = TV.pts.get(r.f.id);
+        if (old !== undefined && old !== r.rank) TV.moves.set(r.f.id, { d: old - r.rank, t: now });
+        if (op !== undefined && r.p > op) TV.bumps.set(r.f.id, { g: r.p - op, t: now });
+    });
+    TV.ranks = new Map(rows.map(r => [r.f.id, r.rank]));
+    TV.pts = new Map(rows.map(r => [r.f.id, r.p]));
+    if (!TV.seen) TV.seen = new Set(state.results.map(r => r.id));
+    else state.results.forEach(r => { if (!TV.seen.has(r.id)) { TV.seen.add(r.id); TV.newAt.set(r.id, { t: now }); } });
+    TV.ready = true;
+
+    $('#tv-day').textContent = `DAY ${tvPad(Number(today) - 18)}`;
+    const pages = Math.max(1, Math.ceil(rows.length / TV_PAGE));
+    if (TV.page >= pages) TV.page = 0;
+    const slice = rows.slice(TV.page * TV_PAGE, (TV.page + 1) * TV_PAGE), box = $('#tv-rows');
+    const before = new Map();
+    box.querySelectorAll('[data-id]').forEach(n => before.set(n.dataset.id, n.getBoundingClientRect().top));
+    box.innerHTML = slice.map(r => {
+        const f = r.f, mv = tvAge(TV.moves, f.id, TV_MOVE), bp = tvAge(TV.bumps, f.id);
+        return `<div class="tv-row r${Math.min(r.rank, 4)}${bp ? ' bump' : ''}" data-id="${esc(f.id)}"${bp ? ` style="--age:${bp.age}ms"` : ''}><div class="tv-rank">${tvPad(r.rank)}${mv ? `<sup class="tv-mv ${mv.d > 0 ? 'up' : 'down'}">${mv.d > 0 ? '▲' : '▼'}${Math.abs(mv.d)}</sup>` : ''}</div><div class="tv-fighter">${avatar(f)}<div class="tv-name"><b>${esc(f.name)}</b><span class="tv-fn">${esc(f.function)}</span></div></div><div class="tv-today">${r.t > 0 ? '+' + format(r.t) : '—'}</div><div class="tv-total">${bp ? `<i class="tv-gain">+${format(bp.g)}</i>` : ''}<data class="cnt" value="${r.p}" data-key="tv:${esc(f.id)}">${format(r.p)}</data></div></div>`;
+    }).join('') || '<p class="tv-empty">THE ARENA IS EMPTY.<br>ADD FIGHTERS IN THE CONTROL ROOM.</p>';
+    if (before.size && !reduceMotion()) box.querySelectorAll('[data-id]').forEach(n => {
+        const o = before.get(n.dataset.id);
+        if (o === undefined) return;
+        const dy = o - n.getBoundingClientRect().top;
+        if (Math.abs(dy) > 2) n.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 800, easing: 'cubic-bezier(.2,.9,.25,1)' });
+    });
+    runCounts(box);
+    $('#tv-pager').innerHTML = pages > 1 ? `<span>${TV.page * TV_PAGE + 1}—${Math.min(rows.length, (TV.page + 1) * TV_PAGE)} OF ${rows.length}</span><span class="tv-dots">${Array.from({ length: pages }, (_, i) => `<i class="${i === TV.page ? 'on' : ''}"></i>`).join('')}</span>` : '';
+
+    const byFn = new Map();
+    rows.forEach(r => { const k = fnKey(r.f); if (!byFn.has(k)) byFn.set(k, []); byFn.get(k).push(r); });
+    $('#tv-fns').innerHTML = [...byFn.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([k, list]) => {
+        const top = list[0], has = top.p > 0;
+        return `<div class="tv-fcard"><span class="tv-fkey">${esc(k)}</span><b>${has ? esc(top.f.name) : '—'}</b><span class="tv-fpts">${has ? format(top.p) + ' PTS' : 'NO POINTS YET'}</span></div>`;
+    }).join('') || '<p class="tv-empty">NO FUNCTIONS YET.</p>';
+
+    $('#tv-feed').innerHTML = state.results.slice(-8).reverse().map(r => {
+        const f = state.fighters.find(x => x.id === r.fighter), k = state.kpis.find(x => x.id === r.kpi);
+        if (!f || !k) return '';
+        const nw = tvAge(TV.newAt, r.id);
+        return `<div class="tv-hit${nw ? ' fresh' : ''}"${nw ? ` style="--age:${nw.age}ms"` : ''}><div><b>${esc(f.name)}</b><small>${r.quantity} × ${esc(k.name)} · DAY ${tvPad(Number(r.day) - 18)}</small></div><b class="tv-pts">+${format(points(r))}</b></div>`;
+    }).join('') || '<p class="tv-empty">WAITING FOR THE FIRST HIT.</p>';
+
+    $('#tv-stats').textContent = `${state.fighters.length} FIGHTERS · ${format(rows.reduce((n, r) => n + r.p, 0))} POINTS · ${state.results.filter(r => r.day === today).length} RESULTS TODAY`;
+    tvTick();
+}
+async function tvWake() {
+    try { if (TV.on && !document.hidden && 'wakeLock' in navigator) TV.wake = await navigator.wakeLock.request('screen'); } catch {}
+}
+function setTV(on) {
+    if (on === TV.on) return;
+    TV.on = on;
+    document.body.classList.toggle('projector', on);
+    $('#projector').textContent = on ? '↙ Exit projector mode' : '⛶ Projector mode';
+    if (on) {
+        ensureTV().hidden = false;
+        TV.ready = false; TV.seen = null; TV.page = 0; TV.moves.clear(); TV.bumps.clear(); TV.newAt.clear();
+        renderTV();
+        TV.timers = [setInterval(tvTick, 5000), setInterval(() => {
+            if (state.fighters.length > TV_PAGE) { TV.page++; renderTV(); }
+            else renderTV();                                  // also expires old flashes
+        }, TV_ROTATE)];
+        TV.idle = setTimeout(() => document.body.classList.add('tv-idle'), 3000);
+        const root = document.documentElement;
+        if (root.requestFullscreen && !document.fullscreenElement) root.requestFullscreen().then(() => { TV.fs = true; }).catch(() => {});
+        tvWake();
+    } else {
+        TV.timers.forEach(clearInterval); TV.timers = [];
+        clearTimeout(TV.idle);
+        document.body.classList.remove('tv-idle');
+        const el = $('#tv'); if (el) el.hidden = true;
+        try { TV.wake && TV.wake.release(); } catch {}
+        TV.wake = null;
+        if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        TV.fs = false;
+        window.scrollTo(0, 0);
+    }
+}
+document.addEventListener('fullscreenchange', () => { if (TV.on && TV.fs && !document.fullscreenElement) setTV(false); });   // Esc in fullscreen = leave projector mode
+document.addEventListener('visibilitychange', () => { if (TV.on && !document.hidden) { tvWake(); renderTV(); } });
 
 /* ---------- Live ticker ---------- */
 let tkSig = '';
@@ -1110,65 +1317,3 @@ function typeOut(root) {
     let t; new MutationObserver(() => { clearTimeout(t); t = setTimeout(stamp, 120); }).observe(document.body, { childList: true, subtree: true });
     stamp();
 })();
-/* ---------- Fast result entry (tap fighter → tap KPI) ---------- */
-let entry = { f: '', last: '', day: '' };
-const kpiFits = (k, fn) => !k.function || String(k.function).toUpperCase().split(/[,\s\/]+/).some(x => x === 'ALL' || x === fn);
-function entryPane() {
-    const fs = state.fighters, f = fs.find(x => x.id === entry.f), fn = f ? f.function.toUpperCase() : '';
-    const ks = f ? state.kpis.filter(k => kpiFits(k, fn)) : [];
-    const days = ['19', '20', '21', '22'].map((d, i) => `<option value="${d}" ${d === (entry.day || cairoDay()) ? 'selected' : ''}>Day 0${i + 1}</option>`).join('');
-    const recent = state.results.slice(-12).reverse().map(r => {
-        const a = fs.find(x => x.id === r.fighter), k = state.kpis.find(x => x.id === r.kpi);
-        return a && k ? `<div class="adm-row"><span><b>${esc(a.name)}</b><small>${r.quantity} × ${esc(k.name)} · Day ${Number(r.day) - 18}</small></span><b>+${format(points(r))}</b><button type="button" class="adm-x" data-act="del-result" data-id="${esc(r.id)}" aria-label="Delete result">×</button></div>` : '';
-    }).join('');
-    return `<div class="ent-grid">${fs.map(x => `<button type="button" class="ent-f${x.id === entry.f ? ' on' : ''}" data-act="pick" data-id="${esc(x.id)}">${fno(x)}<b>${esc(x.name)}</b><small>${esc(x.function)}</small></button>`).join('')}</div>`
-        + (f ? `<div class="ent-bar"><b>${esc(f.name)}</b><label>Qty<input id="e-q" type="number" min="1" step="1" value="1"></label><label>Day<select id="e-day">${days}</select></label>${entry.last ? '<button type="button" class="outline" data-act="undo">Undo last</button>' : ''}</div><div class="ent-k">${ks.map(k => `<button type="button" class="primary" data-act="add" data-id="${esc(k.id)}">${esc(k.name)}<small>${format(k.weight)} pts</small></button>`).join('') || '<p class="helper">No KPIs for this function. Fill the function column in the KPIs sheet.</p>'}</div>` : '<p class="helper">Tap a fighter, then a KPI to score it.</p>')
-        + `<h4>Latest results</h4><div class="adm-list">${recent || '<p class="helper">No results yet.</p>'}</div>`;
-}
-document.addEventListener('change', e => { if (e.target.id === 'e-day') entry.day = e.target.value; });
-document.addEventListener('click', e => {
-    const b = e.target.closest('#admin [data-act]');
-    if (!b) return;
-    const a = b.dataset.act;
-    if (a === 'pick') { entry.f = b.dataset.id; renderAdmin(); }
-    else if (a === 'add' && entry.f) {
-        const r = { id: uid(), fighter: entry.f, kpi: b.dataset.id, quantity: Math.min(100000, Math.max(1, parseInt($('#e-q')?.value) || 1)), day: $('#e-day')?.value || cairoDay(), ts: Date.now() };
-        entry.day = r.day; entry.last = r.id;
-        state.results.push(r); enqueue('addResult', { result: r });
-        adminSave(`+${format(points(r))} points added.`);
-    } else if (a === 'undo' && entry.last) {
-        const id = entry.last; entry.last = '';
-        state.results = state.results.filter(r => r.id !== id); enqueue('deleteResult', { id });
-        adminSave('Last result undone.');
-    }
-});
-
-/* ---------- Projector stage: fullscreen, auto-rotating scenes ---------- */
-const stage = { on: false, scene: 0, timer: 0, clock: 0 }, SCENES = ['board', 'hits', 'lead'];
-function tickClock() { const c = $('.st-clock'); if (c) c.textContent = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Cairo' }); }
-function drawStage() {
-    const el = $('#stage'); if (!el) return;
-    const rows = ranked(), max = Math.max(1, rows[0] ? rows[0].points : 1), s = SCENES[stage.scene], period = day === 'all' ? 'Overall' : `Day 0${Number(day) - 18}`;
-    let body = '';
-    if (s === 'board') body = rows.slice(0, 10).map(f => `<div class="st-row${f.rank === 1 ? ' one' : ''}"><b class="st-rk">${f.rank}</b><span class="st-av">${esc(initials(f.name))}${imgTag(f, '', 96)}</span><span class="st-nm">${esc(f.name)}<small>${esc(f.function)}</small></span><i class="st-bar"><u style="width:${Math.max(1, f.points / max * 100)}%"></u></i><strong>${format(f.points)}</strong><span class="st-d">${deltaBadge(deltaInfo(f.id))}</span></div>`).join('') || '<p class="st-empty">No fighters yet.</p>';
-    else if (s === 'hits') body = selectedResults().slice(-8).reverse().map(r => { const f = state.fighters.find(x => x.id === r.fighter), k = state.kpis.find(x => x.id === r.kpi); return f && k ? `<div class="st-hit"><b>+${format(points(r))}</b><span>${esc(f.name)}<small>${r.quantity} × ${esc(k.name)}</small></span></div>` : ''; }).join('') || '<p class="st-empty">No results yet.</p>';
-    else { const a = rows[0], b = rows[1]; body = a ? `<div class="st-lead"><small>${period} leader</small><h2>${esc(a.name)}</h2><strong>${format(a.points)}</strong><p>${b ? (a.points === b.points ? 'Tied for the lead' : format(a.points - b.points) + ' points ahead of ' + esc(b.name)) : ''}</p></div>` : '<p class="st-empty">The arena is open.</p>'; }
-    el.innerHTML = `<header><span>Ain Shams Fight Club</span><span>${period}</span><span class="st-clock"></span></header><div class="st-body st-${s}">${body}</div><footer>${SCENES.map((x, i) => `<i class="${i === stage.scene ? 'on' : ''}"></i>`).join('')}</footer>`;
-    tickClock();
-}
-function stageToggle(on) {
-    let el = $('#stage');
-    if (!el) { el = document.createElement('div'); el.id = 'stage'; el.hidden = true; el.onclick = () => stageToggle(false); document.body.appendChild(el); }
-    stage.on = on; el.hidden = !on; document.body.classList.toggle('staged', on);
-    clearInterval(stage.timer); clearInterval(stage.clock);
-    if (on) {
-        stage.scene = 0; drawStage();
-        stage.timer = setInterval(() => { stage.scene = (stage.scene + 1) % SCENES.length; drawStage(); }, 15000);
-        stage.clock = setInterval(tickClock, 20000);
-        document.documentElement.requestFullscreen?.().catch(() => {});
-    } else if (document.fullscreenElement) document.exitFullscreen?.();
-}
-$('#projector').onclick = () => stageToggle(true);
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && stage.on) stageToggle(false); });
-document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && stage.on) stageToggle(false); });
-{ const _r = render; render = function () { _r(); if (stage.on) drawStage(); }; }
