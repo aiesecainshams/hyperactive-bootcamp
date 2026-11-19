@@ -169,14 +169,15 @@ try { plansDirty = localStorage.getItem(PLANS_DIRTY_KEY) === '1'; } catch {}
 const cleanPlans = p => { const o = {}; if (p && typeof p === 'object') for (const [k, v] of Object.entries(p)) { const n = Number(v); if (v !== '' && v != null && Number.isFinite(n) && n >= 0) o[k] = n; } return o; };
 function planModel() {
     const nm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const tok = s => String(s || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).sort().join(' ');   // word order doesn't matter: "OGV APL" = "APL OGV"
     const qty = new Map();
     state.results.forEach(r => qty.set(r.kpi, (qty.get(r.kpi) || 0) + r.quantity));
     const P = state.plans || {};
     const groups = PLAN_DEF.map(g => ({
         fn: g.fn,
         rows: g.kpis.map(type => {
-            const label = `${type} ${g.fn}`, L = nm(label), T = nm(type), F = nm(g.fn);
-            const ks = state.kpis.filter(k => nm(k.name) === L || (nm(k.name) === T && kpiFns(k).map(nm).includes(F)));
+            const label = `${type} ${g.fn}`, L = tok(label), T = nm(type), F = nm(g.fn);
+            const ks = state.kpis.filter(k => tok(k.name) === L || (nm(k.name) === T && kpiFns(k).map(nm).includes(F)));
             return { label, type, plan: Number(P[label]) || 0, ach: ks.reduce((n, k) => n + (qty.get(k.id) || 0), 0), matched: ks.length > 0 };
         })
     }));
@@ -200,7 +201,7 @@ function renderPva() {
         return `<article class="pva-card"><div class="pva-title"><h3>${esc(g.fn)}</h3><span class="eyebrow">${g.rows.filter(r => r.plan > 0 && r.ach >= r.plan).length} / ${g.rows.length} ON PLAN</span></div>${pvaHead('KPI')}${g.rows.map(r => pvaRow(r.type, r.plan, r.ach)).join('')}</article>`;
     }).join('');
     const none = !Object.values(state.plans || {}).some(v => v > 0);
-    const miss = m.missing.length ? `<p class="pva-note">No scoring KPI is linked to: ${esc(m.missing.slice(0, 8).join(', '))}${m.missing.length > 8 ? ` and ${m.missing.length - 8} more` : ''}. Results only count toward Achieved when a KPI in the Control room is named exactly like the plan KPI (e.g. “APL OGV”), or is named “APL” and restricted to function OGV.</p>` : '';
+    const miss = m.missing.length ? `<p class="pva-note">No scoring KPI is linked to: ${esc(m.missing.slice(0, 8).join(', '))}${m.missing.length > 8 ? ` and ${m.missing.length - 8} more` : ''}. Results only count toward Achieved when a KPI in the Control room has the same words as the plan KPI in any order (e.g. “APL OGV” or “OGV APL”), or is named “APL” and restricted to function OGV.</p>` : '';
     box.innerHTML = `${none ? '<p class="pva-note">No plan entered yet. Set targets in Control room → Plan.</p>' : ''}${lc}<div class="pva-grid">${cards}</div>${miss}`;
 }
 function markPlans() {
