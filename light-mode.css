@@ -287,6 +287,53 @@ html[data-theme="light"] .pva-note{background:var(--panel2);color:var(--ink2)}
 html[data-theme="light"] .plan-fs{border-color:var(--line2)}
 html[data-theme="light"] .plan-fs label{color:var(--ink2)}
 
+/* ---------- Projector: tools + takeover safeguard (both themes) ---------- */
+#tv .tv-tools{position:absolute;top:1.4vh;right:1.4vw;z-index:2;display:flex;gap:.6em}
+#tv .tv-tools .tv-exit{position:static}
+body.projector #takeover[open]{display:flex}
+
+/* ---------- Projector / TV board: light mode ---------- */
+html[data-theme="light"] body.projector{background:var(--paper)}
+html[data-theme="light"] #tv{background:#eaf3fc;color:#1b2b40}
+html[data-theme="light"] #tv .tv-top{border-bottom-color:#a9c4de}
+html[data-theme="light"] #tv .tv-mid b{color:var(--red)}
+html[data-theme="light"] #tv .tv-mid span{color:#3d5673}
+html[data-theme="light"] #tv .tv-status{color:#3d5673}
+html[data-theme="light"] #tv .tv-status i{background:#2fb57b;box-shadow:0 0 .9em #2fb57b}
+html[data-theme="light"] #tv .tv-status.bad{color:#c42c45}
+html[data-theme="light"] #tv .tv-status.bad i{background:#e0405a;box-shadow:0 0 .9em #e0405a}
+html[data-theme="light"] #tv .tv-head{color:#6a819b}
+html[data-theme="light"] #tv .tv-row{background:#f7fbff;border-color:#c4d8ec;border-left-color:#a9c4de}
+html[data-theme="light"] #tv .tv-row.r1{background:linear-gradient(90deg,#ffe3e8,#f7fbff 70%);border-color:var(--red)}
+html[data-theme="light"] #tv .tv-row.r2,
+html[data-theme="light"] #tv .tv-row.r3{border-left-color:#5b8fc7}
+html[data-theme="light"] #tv .tv-row.bump{animation-name:tvflashL}
+@keyframes tvflashL{0%{background:#ffd0d8;box-shadow:0 0 0 2px #e0405a,0 0 2em #e0405a55}100%{box-shadow:0 0 0 0 #0000}}
+html[data-theme="light"] #tv .tv-row.r1 .tv-rank,
+html[data-theme="light"] #tv .tv-row.r1 .tv-total{color:var(--red)}
+html[data-theme="light"] #tv .tv-mv.up,
+html[data-theme="light"] #tv .tv-gain,
+html[data-theme="light"] #tv .tv-pts{color:#1f9a63}
+html[data-theme="light"] #tv .tv-mv.down{color:#c42c45}
+html[data-theme="light"] #tv .tv-fn,
+html[data-theme="light"] #tv .tv-fpts,
+html[data-theme="light"] #tv .tv-hit small,
+html[data-theme="light"] #tv .tv-pager,
+html[data-theme="light"] #tv .tv-foot,
+html[data-theme="light"] #tv .tv-empty{color:#6a819b}
+html[data-theme="light"] #tv .tv-today,
+html[data-theme="light"] #tv .tv-fkey{color:#3d5673}
+html[data-theme="light"] #tv .tv-dots i{background:#c4d8ec}
+html[data-theme="light"] #tv .tv-dots i.on{background:var(--red)}
+html[data-theme="light"] #tv .tv-panel{background:#f7fbff;border-color:#c4d8ec}
+html[data-theme="light"] #tv .tv-panel h3{color:var(--red)}
+html[data-theme="light"] #tv .tv-fcard{background:#eaf3fc;border-color:#c4d8ec}
+html[data-theme="light"] #tv .tv-hit{border-bottom-color:#c4d8ec}
+html[data-theme="light"] #tv .tv-hit.fresh{animation-name:tvfreshL}
+@keyframes tvfreshL{0%{background:#d5f0e3}100%{background:#0000}}
+html[data-theme="light"] #tv .tv-foot{border-top-color:#c4d8ec}
+html[data-theme="light"] #tv .tv-exit{background:#f7fbff;color:#1b2b40;border-color:#7fa3c7}
+
 /* new-champion takeover keeps its dark cinematic look */
 
 /* focus ring */
