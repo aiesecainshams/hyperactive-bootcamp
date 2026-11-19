@@ -1,7 +1,8 @@
 /* ====================================================================
    light-mode.css · load AFTER style.css
-   Warm paper + brown ink, no blue tones.
+   Baby blue paper + navy ink. Red stays as the accent.
    Champion card, takeover, projector/TV and splice frames stay dark on purpose.
+   Tweak the palette in the variables block below, everything reads from it.
    ==================================================================== */
 
 /* ---------- Theme toggle button (both themes) ---------- */
@@ -9,105 +10,122 @@
 #theme-toggle:hover{opacity:1}
 
 /* ---------- Light theme ---------- */
-html[data-theme=light]{color-scheme:light;--paper:#f4efe4;--ink:#2a2218;--muted:#7d6e57;--red:#c9353d;--line:#d3c8b0}
-html[data-theme=light] body{background:#f4efe4;color:#2a2218}
+html[data-theme=light]{
+  color-scheme:light;
+  --paper:#eaf4fd;--ink:#12283d;--muted:#6b86a0;--red:#c9353d;--line:#bcd5ea;
+  /* palette */
+  --sky:#eaf4fd;      /* page background */
+  --sky-2:#dcecfa;    /* panels / cards */
+  --sky-3:#d3e6f7;   /* highlighted rows, notices */
+  --sky-4:#c9def0;   /* tracks, hard shadows */
+  --edge:#bcd5ea;    /* hairlines */
+  --edge-2:#9fc0dc;  /* stronger borders */
+  --edge-3:#7fa0bf;  /* outline buttons */
+  --ink-2:#2e4a64;   /* body text in tables */
+  --txt-2:#4a6580;   /* secondary text */
+  --txt-3:#6b86a0;   /* muted text */
+  --txt-4:#8aa8c4;   /* faint text (rank numbers) */
+  --accent:#2f6fb0;  /* blue accent for small labels */
+  --input:#f6fbff;
+}
+html[data-theme=light] body{background:var(--sky);color:var(--ink)}
 html[data-theme=light] body:before{opacity:.06;mix-blend-mode:multiply}
 html[data-theme=light] body:after{animation:none;opacity:0}
-html[data-theme=light] header{background:#f4efe4;border-color:#d3c8b0}
+html[data-theme=light] header{background:var(--sky);border-color:var(--edge)}
 html[data-theme=light] h1,html[data-theme=light] h1 em{text-shadow:none}
 
 /* primary text */
-html[data-theme=light] :is(.brand,.nav.active,.outline,.fighter-cell b,.pursuer strong,.pursuer .p-points,.board-heading h2,.personal-strip h3,.panel-heading h3,.page-title h2,.score-name,.rule-card h3,.rival-card h3,.mission-card h3,.corner-empty h3,.activity-row p,.round-bars b,.compare-scores b,.rules-teaser h3,.pva-row .pva-k,.pva-row .pva-n b,.tk-live,.search input,footer span:first-child,.corner-id h2){color:#2a2218}
-html[data-theme=light] .outline,html[data-theme=light] header .outline{border-color:#8f7f63}
-html[data-theme=light] .outline:hover{background:#2a2218;color:#f4efe4}
+html[data-theme=light] :is(.brand,.nav.active,.outline,.fighter-cell b,.pursuer strong,.pursuer .p-points,.board-heading h2,.personal-strip h3,.panel-heading h3,.page-title h2,.score-name,.rule-card h3,.rival-card h3,.mission-card h3,.corner-empty h3,.activity-row p,.round-bars b,.compare-scores b,.rules-teaser h3,.pva-row .pva-k,.pva-row .pva-n b,.tk-live,.search input,footer span:first-child,.corner-id h2){color:var(--ink)}
+html[data-theme=light] .outline,html[data-theme=light] header .outline{border-color:var(--edge-3)}
+html[data-theme=light] .outline:hover{background:var(--ink);color:var(--sky)}
 
 /* secondary text */
-html[data-theme=light] :is(.nav,.top-line,.demo,.sub,.sub strong,.helper,.board-tools,.table-foot,.page-title>p:last-child,.rule-text,.pursuer small,.fighter-cell small,.arena-totals span,.arena-totals b,.side-title>.eyebrow,.side-title>span:last-child,.personal-strip .eyebrow,.panel-heading .eyebrow,.activity-row small,.countdown-block .eyebrow,.countdown-block b,.countdown-block>span:last-child,.rule-card small,.rule-card .eyebrow,.rules-teaser .eyebrow,.rules-teaser>p:not(.eyebrow),.rival-card p,.mission-card p,.corner-id p,.corner-id>.eyebrow,.corner-number>span,.mission-line small,.round-bars span,.compare-selects label,.comparison-row,.compare-scores span,footer,.fight-ticker,.search span,.kpi-none,.empty,.pva-head,.pva-head span){color:#6b5d48}
-html[data-theme=light] .rival-card .eyebrow,html[data-theme=light] .mission-card .eyebrow{color:#8a6a3a}
-html[data-theme=light] .rival-card>small,html[data-theme=light] .mission-note{color:#7d6e57}
-html[data-theme=light] .search input::placeholder{color:#9a8b72}
+html[data-theme=light] :is(.nav,.top-line,.demo,.sub,.sub strong,.helper,.board-tools,.table-foot,.page-title>p:last-child,.rule-text,.pursuer small,.fighter-cell small,.arena-totals span,.arena-totals b,.side-title>.eyebrow,.side-title>span:last-child,.personal-strip .eyebrow,.panel-heading .eyebrow,.activity-row small,.countdown-block .eyebrow,.countdown-block b,.countdown-block>span:last-child,.rule-card small,.rule-card .eyebrow,.rules-teaser .eyebrow,.rules-teaser>p:not(.eyebrow),.rival-card p,.mission-card p,.corner-id p,.corner-id>.eyebrow,.corner-number>span,.mission-line small,.round-bars span,.compare-selects label,.comparison-row,.compare-scores span,footer,.fight-ticker,.search span,.kpi-none,.empty,.pva-head,.pva-head span){color:var(--txt-2)}
+html[data-theme=light] .rival-card .eyebrow,html[data-theme=light] .mission-card .eyebrow{color:var(--accent)}
+html[data-theme=light] .rival-card>small,html[data-theme=light] .mission-note{color:var(--txt-3)}
+html[data-theme=light] .search input::placeholder{color:var(--txt-4)}
 
 /* panels */
-html[data-theme=light] :is(.side-panel,.personal-strip,.rival-card,.mission-card,.corner-empty,.rule-card,.pva-card,.rules-teaser){background:#ebe4d4}
-html[data-theme=light] :is(.side-panel,.rival-card,.mission-card,.corner-empty,.rule-card,.pva-card){border-color:#cfc3a9}
+html[data-theme=light] :is(.side-panel,.personal-strip,.rival-card,.mission-card,.corner-empty,.rule-card,.pva-card,.rules-teaser){background:var(--sky-2)}
+html[data-theme=light] :is(.side-panel,.rival-card,.mission-card,.corner-empty,.rule-card,.pva-card){border-color:var(--edge)}
 html[data-theme=light] .rival-card{border-top-color:var(--red)}
 html[data-theme=light] .pva-lc{border-color:var(--red)}
-html[data-theme=light] .side-panel{box-shadow:4px 4px 0 #ddd2ba}
-html[data-theme=light] .rules-teaser{box-shadow:5px 5px #ddd2ba}
-html[data-theme=light] .rules-teaser .outline{color:#6b4f2a;border-color:#a58a60}
+html[data-theme=light] .side-panel{box-shadow:4px 4px 0 var(--sky-4)}
+html[data-theme=light] .rules-teaser{box-shadow:5px 5px var(--sky-4)}
+html[data-theme=light] .rules-teaser .outline{color:var(--accent);border-color:var(--edge-3)}
 html[data-theme=light] .personal-strip{border-left-color:var(--red)}
-html[data-theme=light] :is(.pursuer,.activity-row,.mission-line,.arena-totals,.pva-row,.adm-row,.adm-list){border-color:#d3c8b0}
-html[data-theme=light] .pursuer .rank{color:#a8977a}
-html[data-theme=light] .panel-heading,html[data-theme=light] .corner-top{border-color:#bfb08f}
-html[data-theme=light] .hit-icon{border-color:#cbbd9d}
-html[data-theme=light] .mission-line>span{color:#4a3f2f}
+html[data-theme=light] :is(.pursuer,.activity-row,.mission-line,.arena-totals,.pva-row,.adm-row,.adm-list){border-color:var(--edge)}
+html[data-theme=light] .pursuer .rank{color:var(--txt-4)}
+html[data-theme=light] .panel-heading,html[data-theme=light] .corner-top{border-color:var(--edge-2)}
+html[data-theme=light] .hit-icon{border-color:var(--edge-2)}
+html[data-theme=light] .mission-line>span{color:var(--ink-2)}
 
 /* notice, ticker, stamp, tabs, buttons */
-html[data-theme=light] .notice{background:#efe3c6;border-color:#d9c69c;color:#6b5636}
-html[data-theme=light] .notice>span{color:#9a6a2a}
-html[data-theme=light] .notice button{color:#4a3a22}
-html[data-theme=light] .fight-ticker{border-color:#cfc3a9}
-html[data-theme=light] .poster-stamp{border-color:#b9a98a;color:#8a7a5f;box-shadow:inset 0 0 0 7px #f4efe4,inset 0 0 0 8px #b9a98a}
+html[data-theme=light] .notice{background:var(--sky-3);border-color:var(--edge-2);color:var(--txt-2)}
+html[data-theme=light] .notice>span{color:var(--accent)}
+html[data-theme=light] .notice button{color:var(--ink)}
+html[data-theme=light] .fight-ticker{border-color:var(--edge-2)}
+html[data-theme=light] .poster-stamp{border-color:var(--edge-3);color:var(--txt-3);box-shadow:inset 0 0 0 7px var(--sky),inset 0 0 0 8px var(--edge-3)}
 html[data-theme=light] .intro:before{opacity:.35}
-html[data-theme=light] .tabs button{color:#7d6e57}
+html[data-theme=light] .tabs button{color:var(--txt-3)}
 html[data-theme=light] .tabs .selected{color:#fff;box-shadow:3px 3px 0 #e6b8b5}
-html[data-theme=light] .text-button{color:#6b5d48}
+html[data-theme=light] .text-button{color:var(--txt-2)}
 html[data-theme=light] .primary{color:#fff}
 html[data-theme=light] .primary:hover{background:#a52a32}
 
 /* table */
-html[data-theme=light] th{color:#6b5d48;border-color:#bfb08f}
-html[data-theme=light] td{color:#4a3f2f;border-color:#ddd2ba}
-html[data-theme=light] td:nth-child(1){color:#a8977a}
-html[data-theme=light] td:nth-child(5){color:#2a2218}
-html[data-theme=light] td:nth-child(6){color:#7d6e57}
-html[data-theme=light] .first-row{background:#eadfc9}
+html[data-theme=light] th{color:var(--txt-2);border-color:var(--edge-2)}
+html[data-theme=light] td{color:var(--ink-2);border-color:var(--edge)}
+html[data-theme=light] td:nth-child(1){color:var(--txt-4)}
+html[data-theme=light] td:nth-child(5){color:var(--ink)}
+html[data-theme=light] td:nth-child(6){color:var(--txt-3)}
+html[data-theme=light] .first-row{background:var(--sky-3)}
 html[data-theme=light] .first-row td:nth-child(1),html[data-theme=light] .first-row td:nth-child(5){color:var(--red)}
-html[data-theme=light] tbody tr:hover{background:#efe6d2}
-html[data-theme=light] .search{border-color:#bfb08f}
-html[data-theme=light] .mini-avatar{background:#e0d6bf;color:#6b5636;border-color:#cbbd9d}
-html[data-theme=light] .func-tag,html[data-theme=light] .kpi-tag{border-color:#cbbd9d;color:#6b5636}
-html[data-theme=light] .chip.fn{color:#2a2218;border-color:#2a2218aa}
+html[data-theme=light] tbody tr:hover{background:#e0eefa}
+html[data-theme=light] .search{border-color:var(--edge-2)}
+html[data-theme=light] .mini-avatar{background:#cfe3f5;color:var(--txt-2);border-color:var(--edge-2)}
+html[data-theme=light] .func-tag,html[data-theme=light] .kpi-tag{border-color:var(--edge-2);color:var(--txt-2)}
+html[data-theme=light] .chip.fn{color:var(--ink);border-color:#12283daa}
 html[data-theme=light] tr.improved .fighter-cell b{color:#c2426f}
 html[data-theme=light] .belt{color:#8c2a30;border-color:#8c2a30}
-html[data-theme=light] .delta.down{color:#6b5d48;border-color:#bfb08f}
+html[data-theme=light] .delta.down{color:var(--txt-2);border-color:var(--edge-2)}
 html[data-theme=light] tr.moved-up{animation-name:rowUpL}
-@keyframes rowUpL{0%{background:#f0c9c6}100%{background:transparent}}
+@keyframes rowUpL{0%{background:#f3c4c8}100%{background:transparent}}
 
 /* sign-off + footer */
-html[data-theme=light] .arena-signoff{border-color:#d3c8b0}
-html[data-theme=light] .arena-signoff h2{color:#d8cdb4}
-html[data-theme=light] .arena-signoff em{color:#e2bdb4}
-html[data-theme=light] .arena-signoff>span,html[data-theme=light] .arena-signoff p{color:#8a7a5f}
-html[data-theme=light] footer{border-color:#d3c8b0}
+html[data-theme=light] .arena-signoff{border-color:var(--edge)}
+html[data-theme=light] .arena-signoff h2{color:#c3dbef}
+html[data-theme=light] .arena-signoff em{color:#efc3c8}
+html[data-theme=light] .arena-signoff>span,html[data-theme=light] .arena-signoff p{color:var(--txt-3)}
+html[data-theme=light] footer{border-color:var(--edge)}
 
 /* inputs */
-html[data-theme=light] :is(select,.weight-row input,.stack input,.edit-fighter input,.stack select,#admin input:not([type=file]),#admin select){background:#fbf8f1;color:#2a2218;border-color:#bfb08f}
-html[data-theme=light] select option{background:#fbf8f1;color:#2a2218}
-html[data-theme=light] :is(.weight-row label,.stack label,#admin h4,.adm-form label,.adm-row small,.plan-fs label){color:#7d6e57}
+html[data-theme=light] :is(select,.weight-row input,.stack input,.edit-fighter input,.stack select,#admin input:not([type=file]),#admin select){background:var(--input);color:var(--ink);border-color:var(--edge-2)}
+html[data-theme=light] select option{background:var(--input);color:var(--ink)}
+html[data-theme=light] :is(.weight-row label,.stack label,#admin h4,.adm-form label,.adm-row small,.plan-fs label){color:var(--txt-3)}
 
 /* dialogs + control room */
-html[data-theme=light] dialog{background:#f4efe4;color:#2a2218;border-color:#bfb08f;box-shadow:8px 8px 0 #0002}
-html[data-theme=light] #scorecard{background:#ebe4d4}
-html[data-theme=light] .close{color:#6b5d48}
-html[data-theme=light] .adm-tabs button,html[data-theme=light] .adm-x{border-color:#bfb08f;color:#2a2218}
+html[data-theme=light] dialog{background:var(--sky);color:var(--ink);border-color:var(--edge-2);box-shadow:8px 8px 0 #12283d22}
+html[data-theme=light] #scorecard{background:var(--sky-2)}
+html[data-theme=light] .close{color:var(--txt-2)}
+html[data-theme=light] .adm-tabs button,html[data-theme=light] .adm-x{border-color:var(--edge-2);color:var(--ink)}
 html[data-theme=light] .adm-tabs button.selected{background:var(--red);border-color:var(--red);color:#fff}
 html[data-theme=light] .adm-x:hover{background:var(--red);border-color:var(--red);color:#fff}
-html[data-theme=light] .adm-warn,html[data-theme=light] .pva-note{background:#f1e3c4;color:#6b4a1d}
-html[data-theme=light] #admin-msg{color:#7a5a25}
+html[data-theme=light] .adm-warn,html[data-theme=light] .pva-note{background:var(--sky-3);color:#2f5073}
+html[data-theme=light] #admin-msg{color:#2f5d8a}
 html[data-theme=light] #login-error{color:#b3262e}
-html[data-theme=light] .plan-fs{border-color:#cfc3a9}
-html[data-theme=light] #toast{background:#2a2218;color:#f4efe4}
+html[data-theme=light] .plan-fs{border-color:var(--edge)}
+html[data-theme=light] #toast{background:var(--ink);color:var(--sky)}
 
 /* corner + compare */
-html[data-theme=light] .progress-track,html[data-theme=light] .round-bar{background:#ddd2ba}
-html[data-theme=light] .compare-verdict{background:#f0dcd6}
-html[data-theme=light] .comparison-row{border-color:#d3c8b0}
+html[data-theme=light] .progress-track,html[data-theme=light] .round-bar{background:var(--sky-4)}
+html[data-theme=light] .compare-verdict{background:#f8dde0}
+html[data-theme=light] .comparison-row{border-color:var(--edge)}
 
 /* Planning & PvA */
-html[data-theme=light] .pva-title h3{color:#7a5f33}
+html[data-theme=light] .pva-title h3{color:var(--accent)}
 html[data-theme=light] .pva-lc .pva-title h3{color:var(--red)}
-html[data-theme=light] .pva-bar{background:#ddd2ba}
-html[data-theme=light] .pva-bar i{background:#8a6a3a}
+html[data-theme=light] .pva-bar{background:var(--sky-4)}
+html[data-theme=light] .pva-bar i{background:#4a86c0}
 html[data-theme=light] .pva-row.hit .pva-p{color:#2f8a5a}
 html[data-theme=light] .pva-row.hit .pva-bar i{background:#2f8a5a}
