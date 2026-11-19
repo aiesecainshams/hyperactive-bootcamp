@@ -145,6 +145,89 @@ function kpiTags(f, cls = '') {   // the specific KPIs a fighter has achieved in
 }
 const kpiOptions = f => (f ? kpisFor(f) : state.kpis).map(k => `<option value="${esc(k.id)}">${esc(k.name)} (${format(k.weight)})</option>`).join('') || '<option value="" disabled selected>No KPIs for this function</option>';
 
+
+/* ---------- Planning & PvA ----------
+   Plans are typed in the Control room (Plan tab) and kept in state.plans = { "APL OGV": 120, … }.
+   Achieved is never typed: it is the sum of result quantities recorded under the matching scoring KPI.
+   A scoring KPI counts toward a plan KPI when its name equals the plan label ("APL OGV"),
+   or when it is named like the type ("APL") and restricted to that function (OGV).            */
+const PLAN_DEF = [
+    { fn: 'OGV',  kpis: ['APL', 'ACC', 'APD'] },
+    { fn: 'IGV',  kpis: ['SC VIS', 'VIS', 'SLOT', 'APL', 'ACC', 'APD'] },
+    { fn: 'OGTa', kpis: ['APL', 'ACC', 'APD'] },
+    { fn: 'OGTe', kpis: ['APL', 'ACC', 'APD'] },
+    { fn: 'IGTa', kpis: ['SC VIS', 'VIS', 'SLOT', 'APL', 'ACC', 'APD'] },
+    { fn: 'IGTe', kpis: ['SC VIS', 'VIS', 'SLOT', 'APL', 'ACC', 'APD'] },
+    { fn: 'B2C',  kpis: ['SC VIS', 'VIS', 'DEAL DONE', 'BTP', 'APL', 'APD'] },
+    { fn: 'BD',   kpis: ['SC VISIT', 'VISIT', 'MONEY 1K'] }
+];
+const LC_GROUP = { 'SC VISIT': 'SC VIS', 'VISIT': 'VIS' };   // BD's visit KPIs roll up into the LC visit lines
+const LC_ORDER = ['SC VIS', 'VIS', 'SLOT', 'DEAL DONE', 'BTP', 'APL', 'ACC', 'APD', 'MONEY 1K'];
+const PLANS_DIRTY_KEY = 'asfc-plans-dirty';
+let plansDirty = false, plansBusy = false, plansUnsupported = false;
+try { plansDirty = localStorage.getItem(PLANS_DIRTY_KEY) === '1'; } catch {}
+const cleanPlans = p => { const o = {}; if (p && typeof p === 'object') for (const [k, v] of Object.entries(p)) { const n = Number(v); if (v !== '' && v != null && Number.isFinite(n) && n >= 0) o[k] = n; } return o; };
+function planModel() {
+    const nm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const qty = new Map();
+    state.results.forEach(r => qty.set(r.kpi, (qty.get(r.kpi) || 0) + r.quantity));
+    const P = state.plans || {};
+    const groups = PLAN_DEF.map(g => ({
+        fn: g.fn,
+        rows: g.kpis.map(type => {
+            const label = `${type} ${g.fn}`, L = nm(label), T = nm(type), F = nm(g.fn);
+            const ks = state.kpis.filter(k => nm(k.name) === L || (nm(k.name) === T && kpiFns(k).map(nm).includes(F)));
+            return { label, type, plan: Number(P[label]) || 0, ach: ks.reduce((n, k) => n + (qty.get(k.id) || 0), 0), matched: ks.length > 0 };
+        })
+    }));
+    const lcMap = new Map(LC_ORDER.map(t => [t, { label: t, plan: 0, ach: 0 }]));
+    groups.forEach(g => g.rows.forEach(r => { const t = lcMap.get(LC_GROUP[r.type] || r.type); t.plan += r.plan; t.ach += r.ach; }));
+    return { groups, lc: [...lcMap.values()], missing: groups.flatMap(g => g.rows).filter(r => !r.matched).map(r => r.label) };
+}
+const pvaPct = (a, p) => p > 0 ? Math.round(a / p * 100) : null;
+function pvaRow(label, plan, ach) {
+    const pct = pvaPct(ach, plan);
+    return `<div class="pva-row${pct != null && pct >= 100 ? ' hit' : ''}"><span class="pva-k">${esc(label)}</span><span class="pva-n">${plan ? format(plan) : '—'}</span><span class="pva-n"><b>${format(ach)}</b></span><span class="pva-p">${pct == null ? '—' : pct + '%'}</span><span class="pva-bar"><i style="width:${pct == null ? 0 : Math.min(100, pct)}%"></i></span></div>`;
+}
+const pvaHead = first => `<div class="pva-row pva-head"><span>${first}</span><span>PLAN</span><span>ACHIEVED</span><span>PvA</span></div>`;
+function renderPva() {
+    const box = $('#pva-content');
+    if (!box) return;
+    const m = planModel();
+    const lc = `<article class="pva-card pva-lc"><div class="pva-title"><h3>LC TOTAL</h3><span class="eyebrow">ALL FUNCTIONS COMBINED</span></div>${pvaHead('KPI')}${m.lc.map(r => pvaRow(r.label, r.plan, r.ach)).join('')}</article>`;
+    const cards = m.groups.map(g => {
+        const plan = g.rows.reduce((n, r) => n + r.plan, 0);
+        return `<article class="pva-card"><div class="pva-title"><h3>${esc(g.fn)}</h3><span class="eyebrow">${g.rows.filter(r => r.plan > 0 && r.ach >= r.plan).length} / ${g.rows.length} ON PLAN</span></div>${pvaHead('KPI')}${g.rows.map(r => pvaRow(r.type, r.plan, r.ach)).join('')}</article>`;
+    }).join('');
+    const none = !Object.values(state.plans || {}).some(v => v > 0);
+    const miss = m.missing.length ? `<p class="pva-note">No scoring KPI is linked to: ${esc(m.missing.slice(0, 8).join(', '))}${m.missing.length > 8 ? ` and ${m.missing.length - 8} more` : ''}. Results only count toward Achieved when a KPI in the Control room is named exactly like the plan KPI (e.g. “APL OGV”), or is named “APL” and restricted to function OGV.</p>` : '';
+    box.innerHTML = `${none ? '<p class="pva-note">No plan entered yet. Set targets in Control room → Plan.</p>' : ''}${lc}<div class="pva-grid">${cards}</div>${miss}`;
+}
+function markPlans() {
+    plansDirty = true;
+    try { localStorage.setItem(PLANS_DIRTY_KEY, '1'); } catch {}
+    plansUnsupported = false;
+    pushPlans();
+}
+async function pushPlans() {
+    if (!REMOTE || !plansDirty || plansBusy || !getToken()) return;
+    plansBusy = true;
+    try {
+        const r = await post('setPlans', { plans: cleanPlans(state.plans) });
+        if (r && r.ok) {
+            plansDirty = false;
+            try { localStorage.removeItem(PLANS_DIRTY_KEY); } catch {}
+            adminSay('Plan saved and synced to every device.');
+        } else if (r && r.error === 'unauthorized') {
+            setSync('auth');
+        } else {
+            plansUnsupported = true;
+            adminSay('Plan saved on this device only. The server does not store plans yet (needs the Apps Script update).');
+        }
+    } catch { /* offline: retried on the next tick */ }
+    finally { plansBusy = false; }
+}
+
 /* ---------- Identity: fighter numbers, tiers, damage, first night, most improved ---------- */
 const fno = f => String(state.fighters.findIndex(x => x.id === (typeof f === 'string' ? f : f.id)) + 1).padStart(3, '0');   // 001, 002… in sheet order
 const TIERS = [['SPECTATOR', 0], ['RECRUIT', 1], ['BRAWLER', 100], ['VETERAN', 300], ['LEGEND', 600]];   // [name, overall points needed]
@@ -355,6 +438,8 @@ function render() {
     if (view === 'corner')
         renderCorner();
     renderRules();
+    if (view === 'pva')
+        renderPva();
     renderTicker();
     checkChampion();
     renderTV();
@@ -394,8 +479,11 @@ function setView(v) {
     $('#arena-view').hidden = v !== 'arena';
     $('#rules-view').hidden = v !== 'rules';
     $('#corner-view').hidden = v !== 'corner';
+    $('#pva-view').hidden = v !== 'pva';
     if (v === 'corner')
         renderCorner();
+    if (v === 'pva')
+        renderPva();
     $$('.nav').forEach(b => b.classList.toggle('active', b.dataset.view === v));
 }
 $$('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
@@ -637,7 +725,9 @@ async function pull() {
         const j = JSON.stringify(data.state);
         if (j !== sync.lastJson) {
             sync.lastJson = j;
+            const keepPlans = state.plans;
             state = data.state;
+            state.plans = (plansDirty || !data.state.plans) ? (keepPlans || {}) : cleanPlans(data.state.plans);   // server plans win unless we have unsynced edits
             try { persistLocal(); } catch {}
             render();
         }
@@ -646,6 +736,7 @@ async function pull() {
 }
 function tick() {
     if (!REMOTE) return;
+    if (plansDirty && !plansUnsupported && getToken()) pushPlans();
     if (sync.queue.length && getToken()) flush();
     else if (!document.hidden) pull();
 }
@@ -689,7 +780,7 @@ function adminSay(m) { adminMsg = m; const el = $('#admin-msg'); if (el) el.text
 function renderAdmin() {
     const box = $('#admin-body');
     if (!box) return;
-    const tabs = [['results', 'Results'], ['fighters', 'Fighters'], ['kpis', 'KPIs'], ['data', 'Data']];
+    const tabs = [['results', 'Results'], ['fighters', 'Fighters'], ['kpis', 'KPIs'], ['plan', 'Plan'], ['data', 'Data']];
     const selF = state.fighters.find(f => f.id === adminFighter) || state.fighters[0];
     const fOpts = state.fighters.map(f => `<option value="${esc(f.id)}"${selF && f.id === selF.id ? ' selected' : ''}>${fno(f)} · ${esc(f.name)} (${esc(f.function)})</option>`).join('');
     const kOpts = kpiOptions(selF);
@@ -708,6 +799,9 @@ function renderAdmin() {
         body = `<form class="adm-form" data-form="fighter"><label>Name<input name="name" required maxlength="60"></label><label>Function<input name="function" list="fn-list" required maxlength="20"></label><label>Photo link<input name="photo_url" maxlength="500" placeholder="https://… (optional, Drive share link ok)"></label><datalist id="fn-list">${fns}</datalist><button class="primary">Add fighter</button></form><div class="adm-list">${state.fighters.map(f => `<div class="adm-row edit"><input data-edit="fighter-name" data-id="${esc(f.id)}" value="${esc(f.name)}" aria-label="Name"><input data-edit="fighter-fn" data-id="${esc(f.id)}" value="${esc(f.function)}" aria-label="Function" list="fn-list"><input data-edit="fighter-photo" data-id="${esc(f.id)}" value="${esc(f.photo_url || '')}" placeholder="Photo link (https://…)" aria-label="Photo link" maxlength="500"><button type="button" class="adm-x" data-act="del-fighter" data-id="${esc(f.id)}" aria-label="Remove fighter">×</button></div>`).join('') || '<p class="helper">No fighters yet.</p>'}</div>`;
     } else if (adminTab === 'kpis') {
         body = `<p class="helper">Changing a weight recalculates every score in the arena.</p><form class="adm-form" data-form="kpi"><label>KPI name<input name="name" required maxlength="60"></label><label>Points each<input name="weight" type="number" min="0" step="any" required></label><label>Function<input name="function" list="kfn-list" maxlength="40" placeholder="All functions"></label><datalist id="kfn-list">${[...new Set(state.fighters.map(f => f.function))].map(x => `<option value="${esc(x)}">`).join('')}</datalist><button class="primary">Add KPI</button></form><div class="adm-list">${state.kpis.map(k => `<div class="adm-row edit"><input data-edit="kpi-name" data-id="${esc(k.id)}" value="${esc(k.name)}" aria-label="KPI name"><input data-edit="kpi-weight" data-id="${esc(k.id)}" type="number" min="0" step="any" value="${k.weight}" aria-label="Weight"><input data-edit="kpi-fn" data-id="${esc(k.id)}" value="${esc(k.function || '')}" placeholder="All functions" aria-label="Function" list="kfn-list" maxlength="40"><button type="button" class="adm-x" data-act="del-kpi" data-id="${esc(k.id)}" aria-label="Remove KPI">×</button></div>`).join('') || '<p class="helper">No KPIs yet.</p>'}</div>`;
+    } else if (adminTab === 'plan') {
+        const P = state.plans || {};
+        body = `<p class="helper">Set each function's target for the whole bootcamp. Achieved is counted automatically from recorded results. Leave blank for no target.</p><div class="plan-admin">${PLAN_DEF.map(g => `<fieldset class="plan-fs"><legend>${esc(g.fn)}</legend>${g.kpis.map(t => { const lab = `${t} ${g.fn}`; return `<label><span>${esc(lab)}</span><input type="number" min="0" step="any" inputmode="decimal" data-edit="plan" data-key="${esc(lab)}" value="${P[lab] ?? ''}" placeholder="0"></label>`; }).join('')}</fieldset>`).join('')}</div>`;
     } else {
         body = `<p class="helper">${REMOTE ? 'Scores live in the shared Google Sheet and sync to every device. Export a backup before big changes.' : 'Everything is stored in this browser only. Export a backup before closing or switching devices.'}</p><div class="adm-actions"><button type="button" class="outline" data-act="export">Export backup ↗</button><label class="outline adm-file">Import backup<input type="file" accept="application/json" hidden data-edit="import"></label><button type="button" class="outline" data-act="fresh">Clear sample data &amp; start fresh</button>${REMOTE ? '' : '<button type="button" class="outline" data-act="demo">Restore sample data</button>'}<button type="button" class="outline" data-act="preview-takeover">Preview champion takeover</button><button type="button" class="outline" data-act="password">Change password</button><button type="button" class="outline" data-act="lock">Lock control room</button></div>`;
     }
@@ -783,7 +877,7 @@ function adminChange(e) {
             const parsed = JSON.parse(txt);
             if (!valid(parsed)) throw Error();
             if (REMOTE && !confirm('Import replaces ALL fighters, KPIs and results for everyone. Continue?')) return;
-            state = parsed; enqueue('replaceAll', { state: clone(parsed) }); adminSave('Backup imported.');
+            state = parsed; enqueue('replaceAll', { state: clone(parsed) }); if (cleanPlans(state.plans) && Object.keys(cleanPlans(state.plans)).length) markPlans(); adminSave('Backup imported.');
         }).catch(() => adminSay('Invalid backup file. Nothing changed.'));
         return;
     }
@@ -791,6 +885,18 @@ function adminChange(e) {
         adminFighter = t.value;
         const sel = t.form && t.form.querySelector('select[name=kpi]');
         if (sel) sel.innerHTML = kpiOptions(state.fighters.find(x => x.id === t.value));
+        return;
+    }
+    if (kind === 'plan') {   // no re-render, so Tab moves cleanly from one target to the next
+        const key = t.dataset.key, raw = t.value.trim();
+        if (!PLAN_DEF.some(g => g.kpis.some(x => `${x} ${g.fn}` === key))) return;
+        if (raw !== '' && !(Number.isFinite(Number(raw)) && Number(raw) >= 0)) { adminSay('Plan must be a number, 0 or more.'); return; }
+        state.plans = state.plans || {};
+        if (raw === '') delete state.plans[key]; else state.plans[key] = Number(raw);
+        try { persistLocal(); } catch {}
+        render();
+        adminSay(REMOTE ? 'Saving plan…' : 'Plan saved.');
+        markPlans();
         return;
     }
     const id = t.dataset.id;
@@ -885,6 +991,7 @@ $('#login-form').onsubmit = async e => {
         $('#login').close();
         openAdmin();
         flush();
+        pushPlans();
         return;
     }
     if (!saved) {
