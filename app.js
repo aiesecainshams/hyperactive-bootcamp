@@ -92,7 +92,7 @@ quantities.forEach( (qs, i) => qs.forEach( (q, j) => {
 ));
 /* ---------- Backend (Google Sheets via Apps Script) ---------- */
 // Paste the Apps Script Web App URL (ends in /exec). Leave '' to run local-only like before.
-const API_URL = 'https://script.google.com/macros/s/AKfycbxkJke-IToJy1M0WcXPCGISs14_3rFTcrQBjpka9d20iwDvvjEr_hGtx-dOsAifpF-e/exec';
+const API_URL = '';
 const POLL_MS = 20000;
 const REMOTE = !!API_URL;
 const CACHE_KEY = 'asfc-arena-cache-v1', QUEUE_KEY = 'asfc-arena-queue-v1', TS_KEY = 'asfc-arena-ts';
@@ -128,6 +128,78 @@ const initials = n => n.trim().split(/\s+/).map(x => x[0]).slice(0, 2).join('').
 const format = n => n.toLocaleString('en-US', {
     maximumFractionDigits: 2
 });
+
+/* ---------- Photos ---------- */
+function photoSrc(u) {
+    u = String(u || '').trim();
+    if (!/^https:\/\//i.test(u)) return '';
+    const m = u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?(?:[^#]*&)?id=)([\w-]{10,})/);
+    return m ? `https://drive.google.com/thumbnail?id=${m[1]}&sz=w400` : u;   // normal Drive share links just work
+}
+function avatar(f, cls = 'mini-avatar') {
+    const src = photoSrc(f.photo_url);
+    return `<span class="${cls}">${esc(initials(f.name))}${src ? `<img src="${esc(src)}" alt="${esc(f.name)}" loading="lazy" width="40" height="40" onerror="this.remove()">` : ''}</span>`;
+}
+function photoTag(f) {
+    const src = photoSrc(f.photo_url);
+    return src ? `<img class="fighter-photo" src="${esc(src)}" alt="${esc(f.name)}" loading="lazy" width="88" height="88" onerror="this.remove()">` : '';
+}
+document.head.insertAdjacentHTML('beforeend', '<style id="arena-extra-css">'
+    + '.mini-avatar{position:relative;overflow:hidden}'
+    + '.mini-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:grayscale(1) contrast(1.1)}'
+    + '.fighter-photo{display:block;width:88px;height:88px;object-fit:cover;filter:grayscale(1) contrast(1.1);border:2px solid rgba(255,255,255,.25);margin:0 0 12px}'
+    + '#fn-board{margin-top:32px}#fn-board .fn-total{opacity:.7;margin-left:6px;font-size:.8em}#fn-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}'
+    + '.adm-row.edit input[data-edit=fighter-photo]{flex:1 1 100%;grid-column:1/-1;min-width:0}'
+    + '</style>');
+
+/* ---------- Function boards (leaderboard per function) ---------- */
+let fnSel = '';
+const fnKey = f => (f.function || '').trim().toUpperCase() || 'OTHER';
+function ensureFnBoard() {
+    let sec = $('#fn-board');
+    if (sec) return sec;
+    const table = $('#rankings') && $('#rankings').closest('table');
+    if (!table) return null;
+    const anchor = table.closest('section') || table.parentElement;
+    const wrapClass = table.parentElement !== anchor ? table.parentElement.className : '';
+    const periodBtn = $('#periods button');
+    sec = document.createElement('section');
+    sec.id = 'fn-board';
+    sec.dataset.tabClass = periodBtn ? periodBtn.className.replace(/\bselected\b/g, '').trim() : '';
+    sec.dataset.tabsWrap = $('#periods') ? $('#periods').className : '';
+    sec.innerHTML = '<div class="panel-heading"><h3>FUNCTION BOARDS.</h3><span class="eyebrow" id="fn-period"></span></div><div id="fn-tabs" role="tablist"></div>'
+        + `<div class="${esc(wrapClass)}"><table class="${esc(table.className)}">${table.querySelector('thead') ? table.querySelector('thead').outerHTML : ''}<tbody id="fn-rankings"></tbody></table></div>`;
+    anchor.insertAdjacentElement('afterend', sec);
+    $('#fn-tabs').className = sec.dataset.tabsWrap;
+    $('#fn-tabs').style.display = 'flex';
+    $('#fn-tabs').addEventListener('click', e => {
+        const b = e.target.closest('[data-fn]');
+        if (!b) return;
+        fnSel = b.dataset.fn;
+        renderFunctionBoard();
+    });
+    return sec;
+}
+function renderFunctionBoard(rows = ranked()) {
+    const sec = ensureFnBoard();
+    if (!sec) return;
+    const keys = [...new Set(rows.map(fnKey))].sort();
+    sec.hidden = !keys.length;
+    if (!keys.length) return;
+    if (!keys.includes(fnSel)) fnSel = keys[0];
+    const cls = sec.dataset.tabClass;
+    $('#fn-period').textContent = day === 'all' ? 'ALL FOUR DAYS' : `DAY ${Number(day) - 18}`;
+    $('#fn-tabs').innerHTML = keys.map(k => {
+        const total = rows.filter(f => fnKey(f) === k).reduce((n, f) => n + f.points, 0);
+        return `<button type="button" class="${cls}${k === fnSel ? ' selected' : ''}" role="tab" aria-selected="${k === fnSel}" data-fn="${esc(k)}">${esc(k)}<span class="fn-total">${format(total)}</span></button>`;
+    }).join('');
+    let rank = 0;
+    const list = rows.filter(f => fnKey(f) === fnSel).map((f, i, a) => {
+        if (i === 0 || f.points !== a[i - 1].points) rank = i + 1;
+        return { ...f, frank: rank, gap: i ? a[i - 1].points - f.points : 0, first: i === 0 };
+    });
+    $('#fn-rankings').innerHTML = list.map(f => `<tr class="${f.frank === 1 ? 'first-row' : ''}" tabindex="0" role="button" aria-label="View ${esc(f.name)} scorecard" data-fighter="${esc(f.id)}"><td>${String(f.frank).padStart(2, '0')}</td><td><div class="fighter-cell">${avatar(f)}<div><b>${esc(f.name)}</b><small>OVERALL #${String(f.rank).padStart(2, '0')}</small></div></div></td><td><span class="func-tag">${esc(f.function)}</span></td><td>${format(f.quantity)}</td><td>${format(f.points)}</td><td>${f.frank === 1 ? 'THE LEAD' : f.gap === 0 ? 'TIED' : `${format(f.gap)} PTS`}</td><td>↗</td></tr>`).join('') || '<tr><td colspan="7" class="empty">No fighters in this function.</td></tr>';
+}
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
 function toast(message) {
     $('#toast').textContent = message;
@@ -190,13 +262,14 @@ function render() {
     $('#leader-lead').textContent = lead ? (rows[1] ? (lead.points === rows[1].points ? 'Tied for the lead. Every result matters.' : `${format(lead.points - rows[1].points)} points ahead of ${rows[1].name.split(' ')[0]}.`) : 'The first fighter in the arena.') : 'Add fighters in the control room to begin.';
     $('#leader-detail').disabled = !lead;
     $('#leader-detail').onclick = () => lead && showScore(lead.id);
-    $('#pursuit').innerHTML = rows.slice(1, 3).map(f => `<div class="pursuer" role="button" tabindex="0" data-fighter="${esc(f.id)}"><span class="rank">${String(f.rank).padStart(2, '0')}</span><span class="mini-avatar">${esc(initials(f.name))}</span><div><strong>${esc(f.name)}</strong><small>${esc(f.function)} · ${format(lead.points - f.points)} off the lead</small></div><div class="p-points">${format(f.points)}<small>PTS</small></div></div>`).join('') || '<p class="empty">The next challenger could be you.</p>';
+    $('#pursuit').innerHTML = rows.slice(1, 3).map(f => `<div class="pursuer" role="button" tabindex="0" data-fighter="${esc(f.id)}"><span class="rank">${String(f.rank).padStart(2, '0')}</span>${avatar(f)}<div><strong>${esc(f.name)}</strong><small>${esc(f.function)} · ${format(lead.points - f.points)} off the lead</small></div><div class="p-points">${format(f.points)}<small>PTS</small></div></div>`).join('') || '<p class="empty">The next challenger could be you.</p>';
     const current = $('#function-filter').value;
     $('#function-filter').innerHTML = '<option value="all">All functions</option>' + [...new Set(state.fighters.map(f => f.function))].sort().map(f => `<option value="${esc(f)}">${esc(f)}</option>`).join('');
     if ([...$('#function-filter').options].some(x => x.value === current))
         $('#function-filter').value = current;
     renderIdentity();
     renderRows(rows);
+    renderFunctionBoard(rows);
     $('#activity').innerHTML = selectedResults().slice(-5).reverse().map(r => {
         let f = state.fighters.find(f => f.id === r.fighter)
           , k = state.kpis.find(k => k.id === r.kpi);
@@ -215,7 +288,7 @@ function renderRows(rows=ranked()) {
     $('#rankings').innerHTML = filtered.map(f => {
         let index = rows.findIndex(r => r.id === f.id)
           , gap = index ? rows[index - 1].points - f.points : 0;
-        return `<tr class="${f.rank === 1 ? 'first-row' : ''}" tabindex="0" role="button" aria-label="View ${esc(f.name)} scorecard" data-fighter="${esc(f.id)}"><td>${String(f.rank).padStart(2, '0')}</td><td><div class="fighter-cell"><span class="mini-avatar">${esc(initials(f.name))}</span><div><b>${esc(f.name)}</b><small>FIGHTER ${String(state.fighters.findIndex(r => r.id === f.id) + 1).padStart(3, '0')}</small></div></div></td><td><span class="func-tag">${esc(f.function)}</span></td><td>${format(f.quantity)}</td><td>${format(f.points)}</td><td>${f.rank === 1 ? 'THE LEAD' : gap === 0 ? 'TIED' : `${format(gap)} PTS`}</td><td>↗</td></tr>`;
+        return `<tr class="${f.rank === 1 ? 'first-row' : ''}" tabindex="0" role="button" aria-label="View ${esc(f.name)} scorecard" data-fighter="${esc(f.id)}"><td>${String(f.rank).padStart(2, '0')}</td><td><div class="fighter-cell">${avatar(f)}<div><b>${esc(f.name)}</b><small>FIGHTER ${String(state.fighters.findIndex(r => r.id === f.id) + 1).padStart(3, '0')}</small></div></div></td><td><span class="func-tag">${esc(f.function)}</span></td><td>${format(f.quantity)}</td><td>${format(f.points)}</td><td>${f.rank === 1 ? 'THE LEAD' : gap === 0 ? 'TIED' : `${format(gap)} PTS`}</td><td>↗</td></tr>`;
     }
     ).join('') || '<tr><td colspan="7" class="empty">No fighters found.</td></tr>';
 }
@@ -224,7 +297,7 @@ function showScore(id) {
     if (!f)
         return;
     let rs = selectedResults().filter(r => r.fighter === id);
-    $('#scorecard-content').innerHTML = `<h2 class="score-name">${esc(f.name.toUpperCase())}</h2><p class="eyebrow">${esc(f.function)} / RANK ${f.rank} / ${day === 'all' ? 'OVERALL' : `DAY ${Number(day) - 18}`}</p><div class="score-total">${format(f.points)} <small style="font-size:20px">PTS</small></div>${state.kpis.map(k => {
+    $('#scorecard-content').innerHTML = `${photoTag(f)}<h2 class="score-name">${esc(f.name.toUpperCase())}</h2><p class="eyebrow">${esc(f.function)} / RANK ${f.rank} / ${day === 'all' ? 'OVERALL' : `DAY ${Number(day) - 18}`}</p><div class="score-total">${format(f.points)} <small style="font-size:20px">PTS</small></div>${state.kpis.map(k => {
         let q = rs.filter(r => r.kpi === k.id).reduce( (a, r) => a + r.quantity, 0);
         return `<div class="score-line"><span>${esc(k.name)}<br><small>${q} results × ${format(k.weight)} points</small></span><b>${format(q * k.weight)} PTS</b></div>`;
     }
@@ -322,7 +395,7 @@ function renderCorner() {
       , level = tier(f.points)
       , rs = selectedResults().filter(r => r.fighter === f.id)
       , gap = rival ? rival.points - f.points + 1 : 0;
-    box.innerHTML = `<div class="corner-top"><div class="corner-id"><span class="eyebrow">${esc(f.function)} / INDIVIDUAL COMPETITOR</span><h2>${esc(f.name.toUpperCase())}</h2><span class="belt">${level[0]}</span><p>Badge thresholds: 100 / 300 / 600 points</p></div><div class="corner-number"><span>RANK</span><b>${String(f.rank).padStart(2, '0')}</b></div><div class="corner-number"><span>POINTS</span><b>${format(f.points)}</b></div></div><div class="corner-grid"><article class="rival-card"><p class="eyebrow">${rival ? 'YOUR NEXT TARGET' : 'DEFEND THE TOP SPOT'}</p><h3>${rival ? esc(rival.name.toUpperCase()) : 'THEY ARE<br>COMING FOR YOU.'}</h3><p>${rival ? `Earn <b>${format(gap)} more points</b> to take the next position.` : 'You hold the lead. Keep adding verified results to extend it.'}</p><div class="progress-track"><i style="width:${rival ? Math.min(100, 100 * f.points / (rival.points + 1)) : 100}%"></i></div><small>${format(f.points)} / ${rival ? format(rival.points + 1) : 'THE LEAD'}</small></article><article class="mission-card"><p class="eyebrow">MAKE YOUR NEXT MOVE</p><h3>${rival ? 'CLOSE THE GAP.' : 'RAISE THE BAR.'}</h3><p>Possible next moves using current KPI weights.</p>${state.kpis.filter(k => k.weight > 0).slice().sort( (a, b) => b.weight - a.weight).slice(0, 3).map(k => `<div class="mission-line"><b>${Math.ceil((gap || 50) / k.weight)}×</b><span>${esc(k.name)}<small>${format(k.weight)} points each</small></span><span>↗</span></div>`).join('') || '<p>Add positive KPI weights to see suggested moves.</p>'}<small class="mission-note">Suggestions only. Results must be verified.</small></article></div><section class="personal-history"><div class="panel-heading"><h3>YOUR FOUR ROUNDS.</h3><span class="eyebrow">POINTS BY DAY / ALL DAYS</span></div><div class="round-bars">${['19', '20', '21', '22'].map( (d, i) => {
+    box.innerHTML = `<div class="corner-top"><div class="corner-id">${photoTag(f)}<span class="eyebrow">${esc(f.function)} / INDIVIDUAL COMPETITOR</span><h2>${esc(f.name.toUpperCase())}</h2><span class="belt">${level[0]}</span><p>Badge thresholds: 100 / 300 / 600 points</p></div><div class="corner-number"><span>RANK</span><b>${String(f.rank).padStart(2, '0')}</b></div><div class="corner-number"><span>POINTS</span><b>${format(f.points)}</b></div></div><div class="corner-grid"><article class="rival-card"><p class="eyebrow">${rival ? 'YOUR NEXT TARGET' : 'DEFEND THE TOP SPOT'}</p><h3>${rival ? esc(rival.name.toUpperCase()) : 'THEY ARE<br>COMING FOR YOU.'}</h3><p>${rival ? `Earn <b>${format(gap)} more points</b> to take the next position.` : 'You hold the lead. Keep adding verified results to extend it.'}</p><div class="progress-track"><i style="width:${rival ? Math.min(100, 100 * f.points / (rival.points + 1)) : 100}%"></i></div><small>${format(f.points)} / ${rival ? format(rival.points + 1) : 'THE LEAD'}</small></article><article class="mission-card"><p class="eyebrow">MAKE YOUR NEXT MOVE</p><h3>${rival ? 'CLOSE THE GAP.' : 'RAISE THE BAR.'}</h3><p>Possible next moves using current KPI weights.</p>${state.kpis.filter(k => k.weight > 0).slice().sort( (a, b) => b.weight - a.weight).slice(0, 3).map(k => `<div class="mission-line"><b>${Math.ceil((gap || 50) / k.weight)}×</b><span>${esc(k.name)}<small>${format(k.weight)} points each</small></span><span>↗</span></div>`).join('') || '<p>Add positive KPI weights to see suggested moves.</p>'}<small class="mission-note">Suggestions only. Results must be verified.</small></article></div><section class="personal-history"><div class="panel-heading"><h3>YOUR FOUR ROUNDS.</h3><span class="eyebrow">POINTS BY DAY / ALL DAYS</span></div><div class="round-bars">${['19', '20', '21', '22'].map( (d, i) => {
         let n = state.results.filter(r => r.fighter === f.id && r.day === d).reduce( (a, r) => a + points(r), 0)
           , max = Math.max(1, ...['19', '20', '21', '22'].map(x => state.results.filter(r => r.fighter === f.id && r.day === x).reduce( (a, r) => a + points(r), 0)));
         return `<div><span>DAY 0${i + 1}</span><div class="round-bar"><i style="height:${Math.max(2, n / max * 100)}%"></i></div><b>${format(n)}</b></div>`;
@@ -548,7 +621,7 @@ function renderAdmin() {
             : '<p class="helper">Add at least one fighter and one KPI first.</p>';
     } else if (adminTab === 'fighters') {
         const fns = [...new Set(state.fighters.map(f => f.function))].map(x => `<option value="${esc(x)}">`).join('');
-        body = `<form class="adm-form" data-form="fighter"><label>Name<input name="name" required maxlength="60"></label><label>Function<input name="function" list="fn-list" required maxlength="20"></label><datalist id="fn-list">${fns}</datalist><button class="primary">Add fighter</button></form><div class="adm-list">${state.fighters.map(f => `<div class="adm-row edit"><input data-edit="fighter-name" data-id="${esc(f.id)}" value="${esc(f.name)}" aria-label="Name"><input data-edit="fighter-fn" data-id="${esc(f.id)}" value="${esc(f.function)}" aria-label="Function" list="fn-list"><button type="button" class="adm-x" data-act="del-fighter" data-id="${esc(f.id)}" aria-label="Remove fighter">×</button></div>`).join('') || '<p class="helper">No fighters yet.</p>'}</div>`;
+        body = `<form class="adm-form" data-form="fighter"><label>Name<input name="name" required maxlength="60"></label><label>Function<input name="function" list="fn-list" required maxlength="20"></label><label>Photo link<input name="photo_url" maxlength="500" placeholder="https://… (optional, Drive share link ok)"></label><datalist id="fn-list">${fns}</datalist><button class="primary">Add fighter</button></form><div class="adm-list">${state.fighters.map(f => `<div class="adm-row edit"><input data-edit="fighter-name" data-id="${esc(f.id)}" value="${esc(f.name)}" aria-label="Name"><input data-edit="fighter-fn" data-id="${esc(f.id)}" value="${esc(f.function)}" aria-label="Function" list="fn-list"><input data-edit="fighter-photo" data-id="${esc(f.id)}" value="${esc(f.photo_url || '')}" placeholder="Photo link (https://…)" aria-label="Photo link" maxlength="500"><button type="button" class="adm-x" data-act="del-fighter" data-id="${esc(f.id)}" aria-label="Remove fighter">×</button></div>`).join('') || '<p class="helper">No fighters yet.</p>'}</div>`;
     } else if (adminTab === 'kpis') {
         body = `<p class="helper">Changing a weight recalculates every score in the arena.</p><form class="adm-form" data-form="kpi"><label>KPI name<input name="name" required maxlength="60"></label><label>Points each<input name="weight" type="number" min="0" step="any" required></label><button class="primary">Add KPI</button></form><div class="adm-list">${state.kpis.map(k => `<div class="adm-row edit"><input data-edit="kpi-name" data-id="${esc(k.id)}" value="${esc(k.name)}" aria-label="KPI name"><input data-edit="kpi-weight" data-id="${esc(k.id)}" type="number" min="0" step="any" value="${k.weight}" aria-label="Weight"><button type="button" class="adm-x" data-act="del-kpi" data-id="${esc(k.id)}" aria-label="Remove KPI">×</button></div>`).join('') || '<p class="helper">No KPIs yet.</p>'}</div>`;
     } else {
@@ -628,6 +701,15 @@ function adminChange(e) {
         return;
     }
     const id = t.dataset.id;
+    if (kind === 'fighter-photo') {
+        const f = state.fighters.find(x => x.id === id), v = t.value.trim();
+        if (!f) return;
+        if (v && !(/^https:\/\//i.test(v) && v.length <= 500)) { adminSay('Photo link must start with https:// (max 500 characters).'); return; }
+        if (v) f.photo_url = v; else delete f.photo_url;
+        enqueue('upsertFighter', { fighter: { ...f, photo_url: v } });
+        adminSave(v ? 'Photo saved.' : 'Photo removed.');
+        return;
+    }
     if (kind === 'fighter-name' || kind === 'fighter-fn') {
         const f = state.fighters.find(x => x.id === id), v = t.value.trim();
         if (!f || !v) { renderAdmin(); return; }
@@ -656,7 +738,10 @@ function adminSubmit(e) {
         enqueue('addResult', { result: res });
         adminSave('Result added.');
     } else if (kind === 'fighter') {
+        const photo = (v.photo_url || '').trim();
+        if (photo && !(/^https:\/\//i.test(photo) && photo.length <= 500)) return adminSay('Photo link must start with https:// (max 500 characters).');
         const fighter = { id: newId('f', state.fighters), name: v.name.trim(), function: v.function.trim() };
+        if (photo) fighter.photo_url = photo;
         state.fighters.push(fighter);
         enqueue('upsertFighter', { fighter: { ...fighter } });
         adminSave('Fighter added.');
