@@ -553,8 +553,11 @@ document.addEventListener('keydown', e => {
         e.preventDefault();
         showScore(e.target.dataset.fighter);
     }
-    if (e.key === 'Escape' && TV.on)
+        if (e.key === 'Escape' && TV.on && !document.querySelector('#takeover[open]'))
         setTV(false);
+    if (TV.on && (e.key === 'l' || e.key === 'L') && !e.target.matches('input,select,textarea')) {
+        const tb = $('#tv-theme'); if (tb) tb.click();   // L = toggle light/dark on the projector
+    }
 }
 );
 $$('.close').forEach(b => b.onclick = () => b.closest('dialog').close());
@@ -1181,8 +1184,10 @@ function tvStatus() {
 function ensureTV() {
     let el = $('#tv');
     if (el) return el;
-    document.body.insertAdjacentHTML('beforeend', `<div id="tv" hidden aria-live="off"><div class="tv-top"><div class="tv-brand"><img src="seal-256.png" alt=""><span>AIN SHAMS<br><b>FIGHT CLUB</b></span></div><div class="tv-mid"><b id="tv-day"></b><span>19—22 NOVEMBER · THE ARENA</span></div><div class="tv-clock"><b id="tv-time"></b><span id="tv-status" class="tv-status"><i></i><em></em></span></div></div><div class="tv-grid"><section class="tv-board"><div class="tv-head"><span>RANK</span><span>FIGHTER</span><span>TODAY</span><span>TOTAL</span></div><div id="tv-rows"></div><div id="tv-pager" class="tv-pager"></div></section><aside class="tv-side"><section class="tv-panel"><h3>FUNCTION LEADERS</h3><div id="tv-fns" class="tv-fns"></div></section><section class="tv-panel tv-feedpanel"><h3>LATEST HITS</h3><div id="tv-feed"></div></section></aside></div><div class="tv-foot"><span id="tv-stats"></span><span>EARN YOUR PLACE.</span><span class="tv-hint">ESC TO EXIT</span></div><button type="button" class="tv-exit" id="tv-exit">✕ Exit</button></div>`);
+    document.body.insertAdjacentHTML('beforeend', `<div id="tv" hidden aria-live="off"><div class="tv-top"><div class="tv-brand"><img src="seal-256.png" alt=""><span>AIN SHAMS<br><b>FIGHT CLUB</b></span></div><div class="tv-mid"><b id="tv-day"></b><span>19—22 NOVEMBER · THE ARENA</span></div><div class="tv-clock"><b id="tv-time"></b><span id="tv-status" class="tv-status"><i></i><em></em></span></div></div><div class="tv-grid"><section class="tv-board"><div class="tv-head"><span>RANK</span><span>FIGHTER</span><span>TODAY</span><span>TOTAL</span></div><div id="tv-rows"></div><div id="tv-pager" class="tv-pager"></div></section><aside class="tv-side"><section class="tv-panel"><h3>FUNCTION LEADERS</h3><div id="tv-fns" class="tv-fns"></div></section><section class="tv-panel tv-feedpanel"><h3>LATEST HITS</h3><div id="tv-feed"></div></section></aside></div><div class="tv-foot"><span id="tv-stats"></span><span>EARN YOUR PLACE.</span><span class="tv-hint">ESC TO EXIT</span></div><div class="tv-tools"><button type="button" class="tv-exit" id="tv-theme">☀ Light</button><button type="button" class="tv-exit" id="tv-exit">✕ Exit</button></div></div>`);`);`);
     $('#tv-exit').onclick = () => setTV(false);
+      $('#tv-theme').onclick = () => { const b = $('#theme-toggle'); if (b) b.click(); tvThemeLabel(); };
+    tvThemeLabel();
     ['mousemove', 'mousedown', 'touchstart'].forEach(ev => document.addEventListener(ev, () => {
         if (!TV.on) return;
         document.body.classList.remove('tv-idle');
@@ -1191,8 +1196,14 @@ function ensureTV() {
     }, { passive: true }));
     return $('#tv');
 }
+
+function tvThemeLabel() {
+    const b = $('#tv-theme');
+    if (b) b.textContent = document.documentElement.dataset.theme === 'light' ? '☾ Dark' : '☀ Light';
+}
 function tvTick() {
     if (!TV.on) return;
+  tvThemeLabel();
     $('#tv-time').textContent = cairoTime(Date.now());
     const s = tvStatus(), el = $('#tv-status');
     el.className = 'tv-status ' + (s.ok ? 'ok' : 'bad');
