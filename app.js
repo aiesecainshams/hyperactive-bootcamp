@@ -506,7 +506,7 @@ function showScore(id) {
         let q = rs.filter(r => r.kpi === k.id).reduce( (a, r) => a + r.quantity, 0);
         return `<div class="score-line"><span>${esc(k.name)}<br><small>${q} results × ${format(k.weight)} points</small></span><b>${format(q * k.weight)} PTS</b></div>`;
     }).join('');
-    $('#scorecard-content').innerHTML = `<div class="dossier" data-tier="${t}"><div class="classified"><span>CLASSIFIED</span><span>CASE FILE №${fno(f)}</span></div><div class="d-top">${portrait(f, 'dossier')}<div class="d-id"><p class="d-label">SUBJECT</p><h2 class="score-name" data-type>${esc(f.name.toUpperCase())}</h2><p class="d-meta" data-type>${esc(f.function)} / RANK ${f.rank} / ${period}</p><p class="d-tags"><span class="belt">${TIERS[t][0]}</span>${chips(id)}</p></div></div><div class="score-total">${format(f.points)} <small>PTS</small></div><div class="d-lines">${lines}</div><p class="d-foot" data-type>PROJECT ARENA / NO SPECTATORS / EVERY POINT EARNED.</p></div>`;
+    $('#scorecard-content').innerHTML = `<div class="dossier" data-tier="${t}"><div class="classified"><span>CLASSIFIED</span><span>CASE FILE №${fno(f)}</span></div><div class="d-top">${portrait(f, 'dossier')}<div class="d-id"><p class="d-label">SUBJECT</p><h2 class="score-name" data-type>${esc(f.name.toUpperCase())}</h2><p class="d-meta" data-type>${esc(f.function)} / RANK ${f.rank} / ${period}</p><p class="d-tags"><span class="belt">${TIERS[t][0]}</span>${chips(id)}</p></div></div><div class="score-total">${format(f.points)} <small>PTS</small></div><div class="d-lines">${lines}</div><p class="d-foot" data-type>PROJECT ARENA / NO SPECTATORS / EVERY POINT EARNED.</p></div><div class="story-open"><button type="button" class="outline" data-story="${esc(f.id)}">Story PNG ↓</button></div>`;
     $('#scorecard').showModal();
     typeOut($('#scorecard-content'));
 }
@@ -1527,3 +1527,215 @@ function typeOut(root) {
     if (bar) bar.insertBefore(btn, bar.lastElementChild);
     apply(get() === 'light' ? 'light' : 'dark');
 })();
+
+/* ---------- Story card: 1080×1920 PNG for Instagram ---------- */
+const ST = { tok: 0 };
+const ST_FONT = "'Barlow Condensed','Arial Narrow',Impact,sans-serif", ST_MONO = "'Space Mono','Courier New',monospace";
+const pad2 = n => String(n).padStart(2, '0');
+const latestDay = () => ['22', '21', '20', '19'].find(d => state.results.some(r => r.day === d)) || '19';
+
+function sBoard(scope) {
+    const rows = state.fighters.map(f => ({
+        f, p: state.results.filter(r => r.fighter === f.id && (scope === 'all' || r.day === scope)).reduce((n, r) => n + points(r), 0)
+    })).sort((a, b) => b.p - a.p || a.f.name.localeCompare(b.f.name));
+    let rk = 0;
+    rows.forEach((r, i) => { if (i === 0 || r.p !== rows[i - 1].p) rk = i + 1; r.rank = rk; });
+    return rows;
+}
+function autoKind(f, scope) {
+    const ld = scope === 'all' ? latestDay() : scope;
+    const dw = sBoard(ld)[0];
+    if (dw && dw.p > 0 && dw.f.id === f.id) return 'day';
+    if (meta().improved === f.id) return 'improved';
+    const ov = sBoard('all')[0];
+    if (ov && ov.p > 0 && ov.f.id === f.id) return 'champion';
+    const fl = sBoard(scope).find(x => fnKey(x.f) === fnKey(f));
+    if (fl && fl.p > 0 && fl.f.id === f.id) return 'fn';
+    return 'plain';
+}
+const stLoad = (src, cors) => new Promise(res => {
+    const i = new Image();
+    if (cors) { i.crossOrigin = 'anonymous'; i.referrerPolicy = 'no-referrer'; }
+    i.onload = () => res(i); i.onerror = () => res(null); i.src = src;
+});
+async function stPhoto(f) {   // lh3 link first: it sends CORS headers, drive thumbnails often don't
+    for (const u of photoUrls(f.photo_url).slice().reverse()) { const i = await stLoad(u, true); if (i) return i; }
+    return null;
+}
+function stGray(img, size) {  // manual grayscale + warm tint (ctx.filter is unsupported on Safari)
+    try {
+        const c = document.createElement('canvas'); c.width = c.height = size;
+        const x = c.getContext('2d'), s = Math.max(size / img.width, size / img.height), w = img.width * s, h = img.height * s;
+        x.drawImage(img, (size - w) / 2, (size - h) * .22, w, h);
+        const d = x.getImageData(0, 0, size, size), p = d.data;
+        for (let i = 0; i < p.length; i += 4) {
+            let g = .3 * p[i] + .59 * p[i + 1] + .11 * p[i + 2];
+            g = Math.max(0, Math.min(255, (g - 128) * 1.15 + 128));
+            p[i] = Math.min(255, g * 1.07 + 4); p[i + 1] = g; p[i + 2] = g * .86;
+        }
+        x.putImageData(d, 0, 0);
+        return c;
+    } catch { return null; }   // tainted canvas → fall back to initials
+}
+function stFit(ctx, text, fontFn, max, start) {
+    let s = start;
+    do { ctx.font = fontFn(s); if (ctx.measureText(text).width <= max) break; s -= 4; } while (s > 30);
+    return s;
+}
+function stSpaced(ctx, t, x, y, sp, align = 'left') {
+    const ch = [...t], w = ch.reduce((n, c) => n + ctx.measureText(c).width + sp, -sp);
+    let cx = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+    ctx.textAlign = 'left';
+    ch.forEach(c => { ctx.fillText(c, cx, y); cx += ctx.measureText(c).width + sp; });
+}
+
+async function drawStory(cv, f, kind, scope) {
+    const W = 1080, H = 1920, ctx = cv.getContext('2d');
+    cv.width = W; cv.height = H;
+    try { await Promise.all([document.fonts.load('900 100px "Barlow Condensed"'), document.fonts.load('700 30px "Barlow Condensed"'), document.fonts.load('700 30px "Space Mono"')]); } catch {}
+    const sc = kind === 'day' ? (scope === 'all' ? latestDay() : scope) : scope;
+    const me = sBoard(sc).find(r => r.f.id === f.id) || { p: 0, rank: 0 };
+    const per = sc === 'all' ? 'OVERALL · ALL FOUR DAYS' : `DAY ${pad2(Number(sc) - 18)}`;
+    const [kick, head, acc] = {
+        champion: ['THE ONE TO BEAT · ' + per, 'CURRENT LEADER', '#e74750'],
+        day: [per, 'DAY WINNER', '#e74750'],
+        improved: ['BIGGEST CLIMB · ' + per, 'MOST IMPROVED', '#f7a8c0'],
+        fn: [fnKey(f) + ' · ' + per, 'FUNCTION LEADER', '#e74750'],
+        plain: [per, 'SCORECARD', '#e74750']
+    }[kind];
+    const [photo, seal] = await Promise.all([stPhoto(f), stLoad('seal-640.png', false)]);
+    const gray = photo ? stGray(photo, 500) : null;
+
+    const by = new Map();
+    state.results.filter(r => r.fighter === f.id && (sc === 'all' || r.day === sc)).forEach(r => {
+        const o = by.get(r.kpi) || { q: 0, p: 0 }; o.q += r.quantity; o.p += points(r); by.set(r.kpi, o);
+    });
+    const top = [...by].map(([id, o]) => ({ k: state.kpis.find(k => k.id === id), ...o })).filter(x => x.k).sort((a, b) => b.p - a.p).slice(0, 3);
+
+    /* background */
+    ctx.fillStyle = '#131211'; ctx.fillRect(0, 0, W, H);
+    const g = ctx.createRadialGradient(540, 800, 40, 540, 800, 1000);
+    g.addColorStop(0, '#3d1114'); g.addColorStop(.55, '#1a0e0d'); g.addColorStop(1, '#0b0a09');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    if (seal) { ctx.globalAlpha = .07; ctx.drawImage(seal, -160, 260, 1400, 1400); ctx.globalAlpha = 1; }
+    ctx.textAlign = 'center'; ctx.font = `900 1250px ${ST_FONT}`;   // giant rank number
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(114,96,72,.35)';
+    ctx.strokeText(pad2(me.rank), 540, 1400);
+    ctx.fillStyle = 'rgba(0,0,0,.18)'; for (let y = 0; y < H; y += 4) ctx.fillRect(0, y, W, 1);   // scanlines
+    for (let i = 0; i < 9000; i++) { ctx.fillStyle = `rgba(231,223,208,${Math.random() * .07})`; ctx.fillRect(Math.random() * W, Math.random() * H, 2, 2); }   // grain
+    ctx.strokeStyle = '#4a3d31'; ctx.lineWidth = 2; ctx.strokeRect(40, 40, W - 80, H - 80);
+
+    /* headline */
+    ctx.fillStyle = acc; ctx.font = `700 30px ${ST_MONO}`;
+    stSpaced(ctx, kick, 540, 300, 5, 'center');
+    const hs = stFit(ctx, head, s => `900 ${s}px ${ST_FONT}`, 940, 200);
+    ctx.textAlign = 'center'; ctx.font = `900 ${hs}px ${ST_FONT}`;
+    ctx.fillStyle = '#732e2e'; ctx.fillText(head, 544, 468);          // misregistered second pass
+    ctx.fillStyle = acc; ctx.fillText(head, 540, 470);
+    ctx.save(); ctx.translate(540, 500); ctx.rotate(-.03); ctx.fillStyle = acc; ctx.fillRect(-190, 0, 380, 8); ctx.restore();
+
+    /* polaroid card */
+    ctx.save(); ctx.translate(540, 830); ctx.rotate(-.04);
+    ctx.shadowColor = 'rgba(0,0,0,.65)'; ctx.shadowBlur = 40; ctx.shadowOffsetY = 18;
+    ctx.fillStyle = '#efe6d0'; ctx.fillRect(-280, -300, 560, 600);
+    ctx.shadowColor = 'transparent';
+    if (gray) ctx.drawImage(gray, -250, -270);
+    else {
+        ctx.fillStyle = '#31281f'; ctx.fillRect(-250, -270, 500, 500);
+        ctx.fillStyle = '#c3ad8d'; ctx.font = `900 230px ${ST_FONT}`; ctx.textAlign = 'center'; ctx.fillText(initials(f.name), 0, 60);
+        ctx.fillRect(-150, -100, 300, 6); ctx.fillRect(-150, 90, 300, 6);
+    }
+    ctx.fillStyle = '#2a2016'; ctx.font = `700 22px ${ST_MONO}`;
+    stSpaced(ctx, `FIGHTER ${fno(f)} / ${f.function.toUpperCase()}`, 0, 272, 3, 'center');
+    ctx.fillStyle = 'rgba(230,217,180,.82)';                          // tape
+    ctx.save(); ctx.translate(-250, -290); ctx.rotate(-.65); ctx.fillRect(-45, -14, 90, 28); ctx.restore();
+    ctx.save(); ctx.translate(250, -290); ctx.rotate(.65); ctx.fillRect(-45, -14, 90, 28); ctx.restore();
+    ctx.save(); ctx.translate(-240, 170); ctx.rotate(-.4);           // red tape
+    ctx.fillStyle = '#e74750'; ctx.fillRect(-175, -28, 350, 56);
+    ctx.fillStyle = '#171211'; ctx.font = `900 36px ${ST_FONT}`; ctx.textAlign = 'center'; ctx.fillText('NO SPECTATORS.', 0, 12);
+    ctx.restore();
+    ctx.restore();
+    const tName = TIERS[tierOf(f.id)][0];                              // tier stamp
+    ctx.save(); ctx.translate(850, 1090); ctx.rotate(.14);
+    ctx.font = `700 30px ${ST_MONO}`; const tw = ctx.measureText(tName).width + 36;
+    ctx.strokeStyle = '#e74750'; ctx.lineWidth = 4; ctx.strokeRect(-tw / 2, -30, tw, 60);
+    ctx.fillStyle = '#e74750'; ctx.textAlign = 'center'; ctx.fillText(tName, 0, 11);
+    ctx.restore();
+
+    /* name + meta */
+    ctx.textAlign = 'center'; ctx.fillStyle = '#eee5d4';
+    const nm = f.name.toUpperCase(), ns = stFit(ctx, nm, s => `800 ${s}px ${ST_FONT}`, 940, 120);
+    ctx.font = `800 ${ns}px ${ST_FONT}`; ctx.fillText(nm, 540, 1215);
+    ctx.fillStyle = '#9c8d7d'; ctx.font = `700 26px ${ST_MONO}`;
+    stSpaced(ctx, `${fnKey(f)} · ${per}`, 540, 1262, 4, 'center');
+
+    /* points + rank */
+    ctx.strokeStyle = '#4a3d31'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(540, 1300); ctx.lineTo(540, 1490); ctx.stroke();
+    const ps = format(me.p), pfs = stFit(ctx, ps, s => `900 ${s}px ${ST_FONT}`, 440, 210);
+    ctx.textAlign = 'center'; ctx.font = `900 ${pfs}px ${ST_FONT}`; ctx.fillStyle = acc; ctx.fillText(ps, 310, 1450);
+    ctx.fillStyle = '#9c8d7d'; ctx.font = `700 24px ${ST_MONO}`; stSpaced(ctx, 'POINTS', 310, 1495, 5, 'center');
+    ctx.textAlign = 'center'; ctx.font = `900 210px ${ST_FONT}`; ctx.fillStyle = '#e7dfd0'; ctx.fillText(pad2(me.rank), 770, 1450);
+    ctx.fillStyle = '#9c8d7d'; ctx.font = `700 24px ${ST_MONO}`; stSpaced(ctx, 'RANK', 770, 1495, 5, 'center');
+
+    /* top KPIs */
+    ctx.setLineDash([6, 6]); ctx.strokeStyle = '#4a3d31'; ctx.lineWidth = 2;
+    if (!top.length) { ctx.textAlign = 'center'; ctx.fillStyle = '#9c8d7d'; ctx.font = `700 26px ${ST_MONO}`; stSpaced(ctx, 'NO RESULTS YET', 540, 1600, 4, 'center'); }
+    top.forEach((x, i) => {
+        const y = 1568 + i * 52;
+        ctx.textAlign = 'left'; ctx.fillStyle = '#d5c2a8'; ctx.font = `700 34px ${ST_FONT}`; ctx.fillText(`${x.k.name.toUpperCase()}  ×${x.q}`, 120, y);
+        ctx.textAlign = 'right'; ctx.fillStyle = acc; ctx.font = `800 36px ${ST_FONT}`; ctx.fillText('+' + format(x.p), 960, y);
+        ctx.beginPath(); ctx.moveTo(120, y + 14); ctx.lineTo(960, y + 14); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+
+    /* footer */
+    ctx.fillStyle = '#79674e'; ctx.font = `700 21px ${ST_MONO}`;
+    stSpaced(ctx, 'AIN SHAMS FIGHT CLUB · 19—22 NOV 2026 · EARN YOUR PLACE', 540, 1712, 3, 'center');
+}
+
+/* ---------- Story dialog ---------- */
+const ST_KINDS = [['auto', 'Auto (best fit)'], ['day', 'Day winner'], ['improved', 'Most improved'], ['champion', 'Current leader'], ['fn', 'Function leader'], ['plain', 'Plain scorecard']];
+function ensureStory() {
+    if ($('#story')) return;
+    document.body.insertAdjacentHTML('beforeend', `<dialog id="story"><div class="dialog-head"><p class="eyebrow red">STORY CARD · 1080×1920</p><button class="close" aria-label="Close">×</button></div><div class="story-ui"><div class="story-controls"><label>Fighter<select id="st-f"></select></label><label>Card<select id="st-k">${ST_KINDS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}</select></label><label>Period<select id="st-d"><option value="all">Overall</option><option value="19">Day 01</option><option value="20">Day 02</option><option value="21">Day 03</option><option value="22">Day 04</option></select></label><div class="adm-actions"><button type="button" class="primary" id="st-dl">Download PNG ↓</button><button type="button" class="outline" id="st-share" hidden>Share…</button></div><p class="helper" id="st-msg"></p></div><canvas id="st-cv" width="1080" height="1920"></canvas></div></dialog>`);
+    const d = $('#story');
+    d.querySelector('.close').onclick = () => d.close();
+    ['st-f', 'st-k', 'st-d'].forEach(id => $('#' + id).onchange = renderStory);
+    $('#st-dl').onclick = () => storyOut(false);
+    $('#st-share').onclick = () => storyOut(true);
+    try { if (navigator.canShare && navigator.canShare({ files: [new File([new Blob()], 'a.png', { type: 'image/png' })] })) $('#st-share').hidden = false; } catch {}
+}
+async function renderStory() {
+    const f = state.fighters.find(x => x.id === $('#st-f').value);
+    if (!f) return;
+    const scope = $('#st-d').value, pick = $('#st-k').value, kind = pick === 'auto' ? autoKind(f, scope) : pick, tok = ++ST.tok;
+    $('#st-msg').textContent = 'Rendering…';
+    await drawStory($('#st-cv'), f, kind, scope);
+    if (tok !== ST.tok) return;
+    $('#st-msg').textContent = pick === 'auto' ? `Auto picked: ${ST_KINDS.find(k => k[0] === kind)[1]}.` : '';
+}
+function openStory(id) {
+    ensureStory();
+    $('#st-f').innerHTML = state.fighters.map(f => `<option value="${esc(f.id)}">${fno(f)} · ${esc(f.name)}</option>`).join('');
+    $('#st-f').value = id; $('#st-k').value = 'auto'; $('#st-d').value = day;
+    const sc = $('#scorecard'); if (sc && sc.open) sc.close();
+    $('#story').showModal();
+    renderStory();
+}
+function storyOut(share) {
+    const f = state.fighters.find(x => x.id === $('#st-f').value);
+    if (!f) return;
+    $('#st-cv').toBlob(async b => {
+        if (!b) { $('#st-msg').textContent = 'Could not export the image.'; return; }
+        const name = `fight-club-${f.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${$('#st-k').value}-${$('#st-d').value}.png`;
+        if (share) {
+            try { await navigator.share({ files: [new File([b], name, { type: 'image/png' })] }); } catch {}
+            return;
+        }
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(b); a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    }, 'image/png');
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-story]'); if (b) openStory(b.dataset.story); });
