@@ -148,10 +148,12 @@ const kpiOptions = f => (f ? kpisFor(f) : state.kpis).map(k => `<option value="$
 
 /* ---------- Planning & PvA ----------
    Plans are typed in the Control room (Plan tab) and kept in state.plans = { "APL OGV": 120, … }.
+   The plan STRUCTURE (which functions, which KPIs) is editable in Control room → Plan → Functions & KPIs
+   and kept in state.planDef = [{ fn: 'OGV', kpis: ['APL','ACC','APD'] }, …]  (DEFAULT_PLAN_DEF until edited).
    Achieved is never typed: it is the sum of result quantities recorded under the matching scoring KPI.
-   A scoring KPI counts toward a plan KPI when its name equals the plan label ("APL OGV"),
+   A scoring KPI counts toward a plan KPI when its name has the same words as the plan label ("APL OGV"),
    or when it is named like the type ("APL") and restricted to that function (OGV).            */
-const PLAN_DEF = [
+const DEFAULT_PLAN_DEF = [
     { fn: 'OGV',  kpis: ['APL', 'ACC', 'APD'] },
     { fn: 'IGV',  kpis: ['SC VIS', 'VIS', 'SLOT', 'APL', 'ACC', 'APD'] },
     { fn: 'OGTa', kpis: ['APL', 'ACC', 'APD'] },
@@ -161,8 +163,38 @@ const PLAN_DEF = [
     { fn: 'B2C',  kpis: ['SC VIS', 'VIS', 'DEAL DONE', 'BTP', 'APL', 'APD'] },
     { fn: 'BD',   kpis: ['SC VISIT', 'VISIT', 'MONEY 1K'] }
 ];
+const cleanPlanDef = d => {
+    const seen = new Set(), out = [];
+    (Array.isArray(d) ? d : []).forEach(g => {
+        const fn = String((g && g.fn) || '').trim().slice(0, 20);
+        if (!fn || seen.has(fn.toLowerCase())) return;
+        seen.add(fn.toLowerCase());
+        const ks = [], sk = new Set();
+        (Array.isArray(g.kpis) ? g.kpis : []).forEach(k => {
+            k = String(k || '').trim().slice(0, 20);
+            if (k && !sk.has(k.toLowerCase())) { sk.add(k.toLowerCase()); ks.push(k); }
+        });
+        out.push({ fn, kpis: ks });
+    });
+    return out.slice(0, 20);
+};
+const planDef = () => Array.isArray(state.planDef) ? cleanPlanDef(state.planDef) : DEFAULT_PLAN_DEF;
+let planMode = 'targets';
+function setPlanDef(next) {
+    next = cleanPlanDef(next);
+    const keep = new Set(next.flatMap(g => g.kpis.map(t => `${t} ${g.fn}`)));
+    const P = state.plans || {};
+    Object.keys(P).forEach(k => { if (!keep.has(k)) delete P[k]; });   // drop targets of removed KPIs
+    state.plans = P;
+    state.planDef = next;
+    try { persistLocal(); } catch {}
+    render();
+    renderAdmin();
+    adminSay(REMOTE ? 'Saving plan structure…' : 'Plan structure saved.');
+    markPlans();
+}
 const LC_GROUP = { 'SC VISIT': 'SC VIS', 'VISIT': 'VIS' };   // BD's visit KPIs roll up into the LC visit lines
-const LC_ORDER = ['SC VIS', 'VIS', 'SLOT', 'DEAL DONE', 'BTP', 'APL', 'ACC', 'APD', 'MONEY 1K'];
+const LC_BASE = ['SC VIS', 'VIS', 'SLOT', 'DEAL DONE', 'BTP', 'APL', 'ACC', 'APD', 'MONEY 1K'];   // preferred order of the LC total rows; new KPI types are appended
 const PLANS_DIRTY_KEY = 'asfc-plans-dirty';
 let plansDirty = false, plansBusy = false, plansUnsupported = false;
 try { plansDirty = localStorage.getItem(PLANS_DIRTY_KEY) === '1'; } catch {}
@@ -173,7 +205,8 @@ function planModel() {
     const qty = new Map();
     state.results.forEach(r => qty.set(r.kpi, (qty.get(r.kpi) || 0) + r.quantity));
     const P = state.plans || {};
-    const groups = PLAN_DEF.map(g => ({
+    const def = planDef();
+    const groups = def.map(g => ({
         fn: g.fn,
         rows: g.kpis.map(type => {
             const label = `${type} ${g.fn}`, L = tok(label), T = nm(type), F = nm(g.fn);
@@ -181,7 +214,9 @@ function planModel() {
             return { label, type, plan: Number(P[label]) || 0, ach: ks.reduce((n, k) => n + (qty.get(k.id) || 0), 0), matched: ks.length > 0 };
         })
     }));
-    const lcMap = new Map(LC_ORDER.map(t => [t, { label: t, plan: 0, ach: 0 }]));
+    const types = [...new Set(def.flatMap(g => g.kpis.map(t => LC_GROUP[t] || t)))];
+    const order = [...LC_BASE.filter(t => types.includes(t)), ...types.filter(t => !LC_BASE.includes(t))];
+    const lcMap = new Map(order.map(t => [t, { label: t, plan: 0, ach: 0 }]));
     groups.forEach(g => g.rows.forEach(r => { const t = lcMap.get(LC_GROUP[r.type] || r.type); t.plan += r.plan; t.ach += r.ach; }));
     return { groups, lc: [...lcMap.values()], missing: groups.flatMap(g => g.rows).filter(r => !r.matched).map(r => r.label) };
 }
@@ -214,7 +249,7 @@ async function pushPlans() {
     if (!REMOTE || !plansDirty || plansBusy || !getToken()) return;
     plansBusy = true;
     try {
-        const r = await post('setPlans', { plans: cleanPlans(state.plans) });
+        const r = await post('setPlans', { plans: cleanPlans(state.plans), planDef: planDef() });
         if (r && r.ok) {
             plansDirty = false;
             try { localStorage.removeItem(PLANS_DIRTY_KEY); } catch {}
@@ -726,9 +761,10 @@ async function pull() {
         const j = JSON.stringify(data.state);
         if (j !== sync.lastJson) {
             sync.lastJson = j;
-            const keepPlans = state.plans;
+            const keepPlans = state.plans, keepDef = state.planDef;
             state = data.state;
             state.plans = (plansDirty || !data.state.plans) ? (keepPlans || {}) : cleanPlans(data.state.plans);   // server plans win unless we have unsynced edits
+            state.planDef = (plansDirty || !Array.isArray(data.state.planDef)) ? keepDef : data.state.planDef;   // same for the plan structure
             try { persistLocal(); } catch {}
             render();
         }
@@ -801,8 +837,13 @@ function renderAdmin() {
     } else if (adminTab === 'kpis') {
         body = `<p class="helper">Changing a weight recalculates every score in the arena.</p><form class="adm-form" data-form="kpi"><label>KPI name<input name="name" required maxlength="60"></label><label>Points each<input name="weight" type="number" min="0" step="any" required></label><label>Function<input name="function" list="kfn-list" maxlength="40" placeholder="All functions"></label><datalist id="kfn-list">${[...new Set(state.fighters.map(f => f.function))].map(x => `<option value="${esc(x)}">`).join('')}</datalist><button class="primary">Add KPI</button></form><div class="adm-list">${state.kpis.map(k => `<div class="adm-row edit"><input data-edit="kpi-name" data-id="${esc(k.id)}" value="${esc(k.name)}" aria-label="KPI name"><input data-edit="kpi-weight" data-id="${esc(k.id)}" type="number" min="0" step="any" value="${k.weight}" aria-label="Weight"><input data-edit="kpi-fn" data-id="${esc(k.id)}" value="${esc(k.function || '')}" placeholder="All functions" aria-label="Function" list="kfn-list" maxlength="40"><button type="button" class="adm-x" data-act="del-kpi" data-id="${esc(k.id)}" aria-label="Remove KPI">×</button></div>`).join('') || '<p class="helper">No KPIs yet.</p>'}</div>`;
     } else if (adminTab === 'plan') {
-        const P = state.plans || {};
-        body = `<p class="helper">Set each function's target for the whole bootcamp. Achieved is counted automatically from recorded results. Leave blank for no target.</p><div class="plan-admin">${PLAN_DEF.map(g => `<fieldset class="plan-fs"><legend>${esc(g.fn)}</legend>${g.kpis.map(t => { const lab = `${t} ${g.fn}`; return `<label><span>${esc(lab)}</span><input type="number" min="0" step="any" inputmode="decimal" data-edit="plan" data-key="${esc(lab)}" value="${P[lab] ?? ''}" placeholder="0"></label>`; }).join('')}</fieldset>`).join('')}</div>`;
+        const P = state.plans || {}, def = planDef();
+        const sub = `<div class="adm-tabs"><button type="button" class="${planMode === 'targets' ? 'selected' : ''}" data-act="plan-mode" data-id="targets">Targets</button><button type="button" class="${planMode === 'structure' ? 'selected' : ''}" data-act="plan-mode" data-id="structure">Functions &amp; KPIs</button></div>`;
+        if (planMode === 'structure') {
+            body = sub + `<p class="helper">One row per function, KPIs comma-separated (e.g. APL, ACC, APD). Renaming a function keeps its targets. Removing a KPI drops its target. A KPI counts Achieved when a scoring KPI in the KPIs tab has the same words ("APL OGV").</p><div class="adm-list">${def.map((g, i) => `<div class="adm-row edit"><input data-edit="pd-fn" data-i="${i}" value="${esc(g.fn)}" aria-label="Function" maxlength="20"><input data-edit="pd-kpis" data-i="${i}" value="${esc(g.kpis.join(', '))}" aria-label="KPIs"><button type="button" class="adm-x" data-act="pd-del" data-id="${i}" aria-label="Remove function">×</button></div>`).join('') || '<p class="helper">No functions yet.</p>'}</div><form class="adm-form" data-form="plandef"><label>New function<input name="fn" required maxlength="20"></label><label>KPIs<input name="kpis" placeholder="APL, ACC, APD"></label><button class="primary">Add function</button></form><div class="adm-actions"><button type="button" class="outline" data-act="pd-reset">Reset to defaults</button></div>`;
+        } else {
+            body = sub + `<p class="helper">Set each function's target for the whole bootcamp. Achieved is counted automatically from recorded results. Leave blank for no target.</p><div class="plan-admin">${def.map(g => `<fieldset class="plan-fs"><legend>${esc(g.fn)}</legend>${g.kpis.map(t => { const lab = `${t} ${g.fn}`; return `<label><span>${esc(t)}</span><input type="number" min="0" step="any" inputmode="decimal" data-edit="plan" data-key="${esc(lab)}" value="${P[lab] ?? ''}" placeholder="0"></label>`; }).join('')}</fieldset>`).join('') || '<p class="helper">Add a function in the Functions &amp; KPIs tab.</p>'}</div>`;
+        }
     } else {
         body = `<p class="helper">${REMOTE ? 'Scores live in the shared Google Sheet and sync to every device. Export a backup before big changes.' : 'Everything is stored in this browser only. Export a backup before closing or switching devices.'}</p><div class="adm-actions"><button type="button" class="outline" data-act="export">Export backup ↗</button><label class="outline adm-file">Import backup<input type="file" accept="application/json" hidden data-edit="import"></label><button type="button" class="outline" data-act="fresh">Clear sample data &amp; start fresh</button>${REMOTE ? '' : '<button type="button" class="outline" data-act="demo">Restore sample data</button>'}<button type="button" class="outline" data-act="preview-takeover">Preview champion takeover</button><button type="button" class="outline" data-act="password">Change password</button><button type="button" class="outline" data-act="lock">Lock control room</button></div>`;
     }
@@ -820,6 +861,14 @@ function adminClick(e) {
     if (!b) return;
     const act = b.dataset.act, id = b.dataset.id;
     if (act === 'tab') { adminTab = id; adminMsg = ''; renderAdmin(); }
+    else if (act === 'plan-mode') { planMode = id; adminMsg = ''; renderAdmin(); }
+    else if (act === 'pd-del') {
+        const def = clone(planDef()), g = def[Number(id)];
+        if (g && confirm(`Remove ${g.fn} and its targets?`)) setPlanDef(def.filter((_, i) => i !== Number(id)));
+    }
+    else if (act === 'pd-reset') {
+        if (confirm('Reset functions and KPIs to the defaults? Targets of removed KPIs are lost.')) setPlanDef(clone(DEFAULT_PLAN_DEF));
+    }
     else if (act === 'del-result') { state.results = state.results.filter(r => r.id !== id); enqueue('deleteResult', { id }); adminSave('Result deleted.'); }
     else if (act === 'del-fighter') {
         const f = state.fighters.find(x => x.id === id);
@@ -878,7 +927,7 @@ function adminChange(e) {
             const parsed = JSON.parse(txt);
             if (!valid(parsed)) throw Error();
             if (REMOTE && !confirm('Import replaces ALL fighters, KPIs and results for everyone. Continue?')) return;
-            state = parsed; enqueue('replaceAll', { state: clone(parsed) }); if (cleanPlans(state.plans) && Object.keys(cleanPlans(state.plans)).length) markPlans(); adminSave('Backup imported.');
+            state = parsed; enqueue('replaceAll', { state: clone(parsed) }); if (Object.keys(cleanPlans(state.plans)).length || Array.isArray(state.planDef)) markPlans(); adminSave('Backup imported.');
         }).catch(() => adminSay('Invalid backup file. Nothing changed.'));
         return;
     }
@@ -888,9 +937,23 @@ function adminChange(e) {
         if (sel) sel.innerHTML = kpiOptions(state.fighters.find(x => x.id === t.value));
         return;
     }
+    if (kind === 'pd-fn' || kind === 'pd-kpis') {   // edit the plan structure (function name / KPI list)
+        const def = clone(planDef()), i = Number(t.dataset.i), g = def[i];
+        if (!g) return;
+        if (kind === 'pd-fn') {
+            const nv = t.value.trim().slice(0, 20);
+            if (!nv || def.some((x, j) => j !== i && x.fn.toLowerCase() === nv.toLowerCase())) { adminSay('Function name is empty or already used.'); renderAdmin(); return; }
+            const P = state.plans || {};
+            g.kpis.forEach(k => { const o = `${k} ${g.fn}`; if (P[o] !== undefined) { P[`${k} ${nv}`] = P[o]; delete P[o]; } });   // keep targets when renaming
+            state.plans = P;
+            g.fn = nv;
+        } else g.kpis = t.value.split(',');
+        setPlanDef(def);
+        return;
+    }
     if (kind === 'plan') {   // no re-render, so Tab moves cleanly from one target to the next
         const key = t.dataset.key, raw = t.value.trim();
-        if (!PLAN_DEF.some(g => g.kpis.some(x => `${x} ${g.fn}` === key))) return;
+        if (!planDef().some(g => g.kpis.some(x => `${x} ${g.fn}` === key))) return;
         if (raw !== '' && !(Number.isFinite(Number(raw)) && Number(raw) >= 0)) { adminSay('Plan must be a number, 0 or more.'); return; }
         state.plans = state.plans || {};
         if (raw === '') delete state.plans[key]; else state.plans[key] = Number(raw);
@@ -956,6 +1019,12 @@ function adminSubmit(e) {
         state.kpis.push(kpi);
         enqueue('upsertKpi', { kpi: { ...kpi } });
         adminSave('KPI added.');
+    } else if (kind === 'plandef') {
+        const def = clone(planDef());
+        def.push({ fn: v.fn, kpis: String(v.kpis || '').split(',') });
+        const clean = cleanPlanDef(def);
+        if (clean.length === planDef().length) return adminSay('That function already exists.');
+        setPlanDef(clean);
     }
 }
 function openAdmin() {
@@ -1424,4 +1493,26 @@ function typeOut(root) {
     });
     let t; new MutationObserver(() => { clearTimeout(t); t = setTimeout(stamp, 120); }).observe(document.body, { childList: true, subtree: true });
     stamp();
+})();
+
+/* ---------- Theme toggle (dark / light) ---------- */
+(function theme() {
+    const KEY = 'asfc-theme', root = document.documentElement;
+    const get = () => { try { return localStorage.getItem(KEY); } catch { return null; } };
+    const bar = document.querySelector('.top-line');
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.id = 'theme-toggle';
+    const apply = t => {
+        root.dataset.theme = t;
+        const m = document.querySelector('meta[name=theme-color]');
+        if (m) m.content = t === 'light' ? '#f4efe4' : '#11100f';
+        btn.textContent = t === 'light' ? '☾ DARK MODE' : '☀ LIGHT MODE';
+    };
+    btn.onclick = () => {
+        const next = root.dataset.theme === 'light' ? 'dark' : 'light';
+        try { localStorage.setItem(KEY, next); } catch {}
+        apply(next);
+    };
+    if (bar) bar.insertBefore(btn, bar.lastElementChild);
+    apply(get() === 'light' ? 'light' : 'dark');
 })();
