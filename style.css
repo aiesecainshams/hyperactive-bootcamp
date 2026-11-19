@@ -4105,3 +4105,37 @@ body.projector.tv-idle{cursor:none}
 body.tv-idle #tv .tv-exit{opacity:0;pointer-events:none}
 @media(max-aspect-ratio:1/1){#tv .tv-grid{grid-template-columns:1fr;overflow:auto}#tv{font-size:clamp(11px,1.5vh,20px)}}
 @media(prefers-reduced-motion:reduce){#tv .tv-status i,#tv .tv-row.bump,#tv .tv-hit.fresh{animation:none}}
+/* ---------- Planning & PvA ---------- */
+#pva-view .pva-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px;margin-top:18px}
+.pva-card{background:#211b15;border:1px solid #513d28;padding:16px 18px 10px;color:var(--ink)}
+.pva-lc{border-color:var(--red);margin-top:6px}
+.pva-lc .pva-title h3{color:var(--red)}
+.pva-title{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:8px}
+.pva-title h3{font-family:var(--font);font-size:30px;line-height:1;letter-spacing:.04em;color:#cdb08a;margin:0}
+.pva-row{display:grid;grid-template-columns:minmax(80px,1.5fr) 1fr 1fr .9fr;gap:10px;align-items:baseline;padding:10px 0 0;border-top:1px solid #3a2e22}
+.pva-row span{font-size:13px}
+.pva-row .pva-k{font-family:var(--font);font-size:20px;letter-spacing:.04em}
+.pva-row .pva-n,.pva-row .pva-p{text-align:right;font-variant-numeric:tabular-nums}
+.pva-row .pva-n b{font-family:var(--font);font-size:22px}
+.pva-row .pva-p{font-family:var(--font);font-size:22px;font-weight:700}
+.pva-row.hit .pva-p{color:#4fb27c}
+.pva-bar{grid-column:1/-1;display:block;height:4px;background:#3a2e22;margin:6px 0 10px;overflow:hidden}
+.pva-bar i{display:block;height:100%;background:#cdb08a}
+.pva-row.hit .pva-bar i{background:#4fb27c}
+.pva-head{border-top:0;padding-top:0;font-size:9px;letter-spacing:.14em;color:#ad9573}
+.pva-head span{font-size:9px!important;text-align:right}
+.pva-head span:first-child{text-align:left}
+.pva-head .pva-bar{display:none}
+.pva-note{margin:16px 0 0;padding:10px 12px;border-left:3px solid var(--red);background:#2f271d;color:#e7c9a0;font-size:13px;line-height:1.5}
+.plan-admin{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;max-height:52vh;overflow:auto;padding-right:4px}
+.plan-fs{border:1px solid #3a2e22;margin:0;padding:6px 12px 12px;min-width:0}
+.plan-fs legend{font-family:var(--font);font-size:20px;letter-spacing:.06em;color:var(--red);padding:0 6px}
+.plan-fs label{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#ad9573}
+.plan-fs input{width:92px;text-align:right}
+@media(max-width:700px){
+  nav{overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+  nav::-webkit-scrollbar{display:none}
+  #pva-view .pva-grid{grid-template-columns:1fr}
+  .pva-card{padding:14px 14px 6px}
+  .pva-row{gap:6px}
+}
