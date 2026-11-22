@@ -1170,7 +1170,8 @@ function playFlip(tb, before) {
    Overall ranking (ignores the Day tab) + today's points · bumps and rank moves as results land ·
    function leaders · latest hits · auto-pages if there are more than 10 fighters ·
    fullscreen + screen wake lock · LIVE / OFFLINE indicator · Esc exits */
-const TV = { on: false, ready: false, page: 0, fs: false, ranks: new Map(), pts: new Map(), moves: new Map(), bumps: new Map(), newAt: new Map(), seen: null, timers: [], wake: null, idle: 0 };
+const TV = { on: false, ready: false, page: 0, fs: false, ranks: new Map(), pts: new Map(), moves: new Map(), bumps: new Map(), newAt: new Map(), seen: null, timers: [], wake: null, idle: 0,
+    scope: (() => { try { return localStorage.getItem('asfc-tv-scope') === 'today' ? 'today' : 'overall'; } catch { return 'overall'; } })() };
 const TV_PAGE = 10, TV_FLASH = 9000, TV_MOVE = 14000, TV_ROTATE = 12000;
 const tvPad = n => String(n).padStart(2, '0');
 const tvAge = (map, id, ms = TV_FLASH) => { const x = map.get(id); if (!x) return null; const age = Date.now() - x.t; if (age > ms) { map.delete(id); return null; } return { ...x, age }; };
