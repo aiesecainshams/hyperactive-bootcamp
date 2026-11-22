@@ -558,6 +558,7 @@ document.addEventListener('keydown', e => {
     if (TV.on && (e.key === 'l' || e.key === 'L') && !e.target.matches('input,select,textarea')) {
         const tb = $('#tv-theme'); if (tb) tb.click();   // L = toggle light/dark on the projector
     }
+  if (TV.on && (e.key === 't' || e.key === 'T') && !e.target.matches('input,select,textarea')) toggleTVScope();
 }
 );
 $$('.close').forEach(b => b.onclick = () => b.closest('dialog').close());
@@ -1185,8 +1186,9 @@ function tvStatus() {
 function ensureTV() {
     let el = $('#tv');
     if (el) return el;
-    document.body.insertAdjacentHTML('beforeend', `<div id="tv" hidden aria-live="off"><div class="tv-top"><div class="tv-brand"><img src="seal-256.png" alt=""><span>AIN SHAMS<br><b>FIGHT CLUB</b></span></div><div class="tv-mid"><b id="tv-day"></b><span>19—22 NOVEMBER · THE ARENA</span></div><div class="tv-clock"><b id="tv-time"></b><span id="tv-status" class="tv-status"><i></i><em></em></span></div></div><div class="tv-grid"><section class="tv-board"><div class="tv-head"><span>RANK</span><span>FIGHTER</span><span>TODAY</span><span>TOTAL</span></div><div id="tv-rows"></div><div id="tv-pager" class="tv-pager"></div></section><aside class="tv-side"><section class="tv-panel"><h3>FUNCTION LEADERS</h3><div id="tv-fns" class="tv-fns"></div></section><section class="tv-panel tv-feedpanel"><h3>LATEST HITS</h3><div id="tv-feed"></div></section></aside></div><div class="tv-foot"><span id="tv-stats"></span><span>EARN YOUR PLACE.</span><span class="tv-hint">ESC TO EXIT</span></div><div class="tv-tools"><button type="button" class="tv-exit" id="tv-theme">☀ Light</button><button type="button" class="tv-exit" id="tv-exit">✕ Exit</button></div></div>`);
+    document.body.insertAdjacentHTML('beforeend', `<div id="tv" hidden aria-live="off"><div class="tv-top"><div class="tv-brand"><img src="seal-256.png" alt=""><span>AIN SHAMS<br><b>FIGHT CLUB</b></span></div><div class="tv-mid"><b id="tv-day"></b><span>19—22 NOVEMBER · THE ARENA</span></div><div class="tv-clock"><b id="tv-time"></b><span id="tv-status" class="tv-status"><i></i><em></em></span></div></div><div class="tv-grid"><section class="tv-board"><div class="tv-head"><span>RANK</span><span>FIGHTER</span><span id="tv-h3">TODAY</span><span id="tv-h4">TOTAL</span></div><div id="tv-rows"></div><div id="tv-pager" class="tv-pager"></div></section><aside class="tv-side"><section class="tv-panel"><h3>FUNCTION LEADERS</h3><div id="tv-fns" class="tv-fns"></div></section><section class="tv-panel tv-feedpanel"><h3>LATEST HITS</h3><div id="tv-feed"></div></section></aside></div><div class="tv-foot"><span id="tv-stats"></span><span>EARN YOUR PLACE.</span><span class="tv-hint">ESC TO EXIT</span></div><div class="tv-tools"><button type="button" class="tv-exit" id="tv-scope"></button><button type="button" class="tv-exit" id="tv-theme">☀ Light</button><button type="button" class="tv-exit" id="tv-exit">✕ Exit</button></div></div>`);
     $('#tv-exit').onclick = () => setTV(false);
+  $('#tv-scope').onclick = toggleTVScope;
       $('#tv-theme').onclick = () => { const b = $('#theme-toggle'); if (b) b.click(); tvThemeLabel(); };
     tvThemeLabel();
     ['mousemove', 'mousedown', 'touchstart'].forEach(ev => document.addEventListener(ev, () => {
@@ -1198,6 +1200,19 @@ function ensureTV() {
     return $('#tv');
 }
 
+function tvScopeLabel() {
+    const b = $('#tv-scope');
+    if (b) b.textContent = TV.scope === 'today' ? '◉ Today · switch to Overall' : '◉ Overall · switch to Today';
+}
+function toggleTVScope() {
+    TV.scope = TV.scope === 'today' ? 'overall' : 'today';
+    try { localStorage.setItem('asfc-tv-scope', TV.scope); } catch {}
+    TV.page = 0;
+    TV.ready = false;
+    TV.moves.clear(); TV.bumps.clear();
+    renderTV();
+}
+
 function tvThemeLabel() {
     const b = $('#tv-theme');
     if (b) b.textContent = document.documentElement.dataset.theme === 'light' ? '☾ Dark' : '☀ Light';
@@ -1205,6 +1220,7 @@ function tvThemeLabel() {
 function tvTick() {
     if (!TV.on) return;
   tvThemeLabel();
+  tvScopeLabel();
     $('#tv-time').textContent = cairoTime(Date.now());
     const s = tvStatus(), el = $('#tv-status');
     el.className = 'tv-status ' + (s.ok ? 'ok' : 'bad');
@@ -1221,7 +1237,9 @@ function renderTV() {
         tot.set(r.fighter, tot.get(r.fighter) + p);
         if (r.day === today) tod.set(r.fighter, tod.get(r.fighter) + p);
     });
-    const rows = state.fighters.map(f => ({ f, p: tot.get(f.id), t: tod.get(f.id) })).sort((a, b) => b.p - a.p || a.f.name.localeCompare(b.f.name));
+    const todayMode = TV.scope === 'today';
+const rows = state.fighters.map(f => ({ f, p: todayMode ? tod.get(f.id) : tot.get(f.id), o: todayMode ? tot.get(f.id) : tod.get(f.id) }))
+    .sort((a, b) => b.p - a.p || a.f.name.localeCompare(b.f.name));
     let rk = 0;
     rows.forEach((r, i) => { if (i === 0 || r.p !== rows[i - 1].p) rk = i + 1; r.rank = rk; });
     if (TV.ready) rows.forEach(r => {                       // what changed since the last data update
@@ -1236,6 +1254,10 @@ function renderTV() {
     TV.ready = true;
 
     $('#tv-day').textContent = `DAY ${tvPad(Number(today) - 18)}`;
+  $('#tv-h3').textContent = todayMode ? 'OVERALL' : 'TODAY';
+$('#tv-h4').textContent = todayMode ? 'TODAY' : 'TOTAL';
+$('#tv-day').nextElementSibling.textContent = todayMode ? 'TODAY ONLY · 19—22 NOVEMBER' : 'OVERALL · 19—22 NOVEMBER';
+tvScopeLabel();
     const pages = Math.max(1, Math.ceil(rows.length / TV_PAGE));
     if (TV.page >= pages) TV.page = 0;
     const slice = rows.slice(TV.page * TV_PAGE, (TV.page + 1) * TV_PAGE), box = $('#tv-rows');
@@ -1243,7 +1265,7 @@ function renderTV() {
     box.querySelectorAll('[data-id]').forEach(n => before.set(n.dataset.id, n.getBoundingClientRect().top));
     box.innerHTML = slice.map(r => {
         const f = r.f, mv = tvAge(TV.moves, f.id, TV_MOVE), bp = tvAge(TV.bumps, f.id);
-        return `<div class="tv-row r${Math.min(r.rank, 4)}${bp ? ' bump' : ''}" data-id="${esc(f.id)}"${bp ? ` style="--age:${bp.age}ms"` : ''}><div class="tv-rank">${tvPad(r.rank)}${mv ? `<sup class="tv-mv ${mv.d > 0 ? 'up' : 'down'}">${mv.d > 0 ? '▲' : '▼'}${Math.abs(mv.d)}</sup>` : ''}</div><div class="tv-fighter">${avatar(f)}<div class="tv-name"><b>${esc(f.name)}</b><span class="tv-fn">${esc(f.function)}</span></div></div><div class="tv-today">${r.t > 0 ? '+' + format(r.t) : '—'}</div><div class="tv-total">${bp ? `<i class="tv-gain">+${format(bp.g)}</i>` : ''}<data class="cnt" value="${r.p}" data-key="tv:${esc(f.id)}">${format(r.p)}</data></div></div>`;
+        return `<div class="tv-row r${Math.min(r.rank, 4)}${bp ? ' bump' : ''}" data-id="${esc(f.id)}"${bp ? ` style="--age:${bp.age}ms"` : ''}><div class="tv-rank">${tvPad(r.rank)}${mv ? `<sup class="tv-mv ${mv.d > 0 ? 'up' : 'down'}">${mv.d > 0 ? '▲' : '▼'}${Math.abs(mv.d)}</sup>` : ''}</div><div class="tv-fighter">${avatar(f)}<div class="tv-name"><b>${esc(f.name)}</b><span class="tv-fn">${esc(f.function)}</span></div></div><div class="tv-today">${todayMode ? format(r.o) : (r.o > 0 ? '+' + format(r.o) : '—')}</div><div class="tv-total">${bp ? `<i class="tv-gain">+${format(bp.g)}</i>` : ''}<data class="cnt" value="${r.p}" data-key="tv:${esc(f.id)}">${format(r.p)}</data></div></div>`;
     }).join('') || '<p class="tv-empty">THE ARENA IS EMPTY.<br>ADD FIGHTERS IN THE CONTROL ROOM.</p>';
     if (before.size && !reduceMotion()) box.querySelectorAll('[data-id]').forEach(n => {
         const o = before.get(n.dataset.id);
@@ -1261,8 +1283,8 @@ function renderTV() {
         return `<div class="tv-fcard"><span class="tv-fkey">${esc(k)}</span><b>${has ? esc(top.f.name) : '—'}</b><span class="tv-fpts">${has ? format(top.p) + ' PTS' : 'NO POINTS YET'}</span></div>`;
     }).join('') || '<p class="tv-empty">NO FUNCTIONS YET.</p>';
 
-    $('#tv-feed').innerHTML = state.results.slice(-8).reverse().map(r => {
-        const f = state.fighters.find(x => x.id === r.fighter), k = state.kpis.find(x => x.id === r.kpi);
+$('#tv-feed').innerHTML = state.results.filter(r => !todayMode || r.day === today).slice(-8).reverse().map(r => {
+  const f = state.fighters.find(x => x.id === r.fighter), k = state.kpis.find(x => x.id === r.kpi);
         if (!f || !k) return '';
         const nw = tvAge(TV.newAt, r.id);
         return `<div class="tv-hit${nw ? ' fresh' : ''}"${nw ? ` style="--age:${nw.age}ms"` : ''}><div><b>${esc(f.name)}</b><small>${r.quantity} × ${esc(k.name)} · DAY ${tvPad(Number(r.day) - 18)}</small></div><b class="tv-pts">+${format(points(r))}</b></div>`;
